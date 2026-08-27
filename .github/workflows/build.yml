@@ -1,3 +1,4 @@
+# rev 2026-08-28:重新註冊排程(8/27 14:49 後 cron 未觸發)
 name: build-dashboard
 on:
   workflow_dispatch:
