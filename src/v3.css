@@ -1,0 +1,240 @@
+:root { color-scheme: light;
+ --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --mut:#898781;
+ --grid:#e1e0d9; --baseline:#c3c2b7; --ring:rgba(11,11,11,.10);
+ --up:#d03b3b; --down:#006300; --accent:#2a78d6;
+ --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+ --s9:#0e8fa8; --s10:#8a6d3b; --s11:#a03fb0; --s12:#5b7c99; }
+@media (prefers-color-scheme: dark) { :root { color-scheme: dark;
+ --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --mut:#898781;
+ --grid:#2c2c2a; --baseline:#383835; --ring:rgba(255,255,255,.10);
+ --up:#e34948; --down:#0ca30c; --accent:#3987e5;
+ --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+ --s9:#35b6d1; --s10:#b58f5c; --s11:#c96fd8; --s12:#8fa9c2; } }
+* { box-sizing:border-box; margin:0; }
+body { background:var(--page); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:24px; }
+.wrap { max-width:980px; margin:0 auto; }
+h1 { font-size:20px; } h2 { font-size:15px; color:var(--ink2); margin-bottom:10px; font-weight:600; }
+.meta { color:var(--mut); font-size:13px; margin:4px 0 20px; }
+.card { background:var(--surface); border:1px solid var(--ring); border-radius:12px; padding:18px 20px; margin-bottom:16px; }
+.tiles { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); margin-bottom:16px; }
+.tile { background:var(--surface); border:1px solid var(--ring); border-radius:12px; padding:14px 16px; }
+.tile .t { font-size:13px; color:var(--ink2); display:flex; gap:6px; align-items:center; justify-content:space-between; }
+.tile .v { font-size:26px; font-weight:650; margin-top:2px; }
+.tile .v.sm2 { font-size:19px; }
+.tile .d { font-size:13px; }
+.up { color:var(--up); } .down { color:var(--down); } .mut { color:var(--mut); }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th { text-align:left; color:var(--mut); font-weight:500; font-size:12.5px; border-bottom:1px solid var(--baseline); padding:6px 8px; }
+td { padding:9px 8px; border-bottom:1px solid var(--grid); vertical-align:top; }
+tr:last-child td { border-bottom:none; }
+.num { text-align:right; font-variant-numeric:tabular-nums; } th.num { text-align:right; }
+.tk,.sub { display:block; font-size:11.5px; color:var(--mut); }
+.cur { font-size:11.5px; color:var(--mut); }
+.badge { font-size:11px; padding:1px 7px; border-radius:99px; border:1px solid var(--ring); color:var(--ink2); white-space:nowrap; }
+.badge.lv { border-color:transparent; background:color-mix(in srgb, var(--s3) 15%, transparent); }
+.badge.warn { border-color:transparent; background:color-mix(in srgb, var(--s4) 18%, transparent); }
+svg { width:100%; height:auto; display:block; }
+.lab { font-size:13px; fill:var(--ink2); }
+.val { font-size:12.5px; font-variant-numeric:tabular-nums; }
+.val.up { fill:var(--up); } .val.down { fill:var(--down); }
+.legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:10px; font-size:13px; color:var(--ink2); }
+.lg i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; }
+.bar { cursor:default; } .bar:hover rect[rx] { opacity:.85; }
+#tip { position:fixed; pointer-events:none; background:var(--ink); color:var(--page); font-size:12.5px;
+ padding:5px 10px; border-radius:8px; opacity:0; transition:opacity .1s; z-index:9; max-width:300px; }
+.note { font-size:12.5px; color:var(--mut); line-height:1.6; }
+button { font:inherit; font-size:13.5px; padding:7px 14px; border-radius:9px; border:1px solid var(--ring);
+ background:var(--surface); color:var(--ink); cursor:pointer; }
+button:hover { border-color:var(--accent); }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.btnrow { display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 14px; align-items:center; }
+.editor input, .editor select { font:inherit; font-size:13.5px; width:100%; padding:5px 8px; border-radius:7px;
+ border:1px solid var(--grid); background:var(--page); color:var(--ink); }
+.editor input.numI { text-align:right; font-variant-numeric:tabular-nums; }
+.editor td { padding:5px 4px; }
+.editor .del { color:var(--mut); background:none; border:none; font-size:16px; padding:2px 8px; }
+.editor .del:hover { color:var(--up); }
+#msg { font-size:13px; color:var(--ink2); }
+details > summary { cursor:pointer; font-size:14px; font-weight:600; color:var(--ink2); }
+.hint { font-size:12.5px; color:var(--mut); margin:8px 0 12px; line-height:1.6; }
+.hint code { background:var(--page); border:1px solid var(--grid); border-radius:4px; padding:0 4px; font-size:12px; }
+
+.sect { font-size:16px; font-weight:700; margin:22px 0 10px; }
+.grp { margin-bottom:14px; }
+.grp h3 { font-size:13.5px; color:var(--ink2); margin:10px 0 6px; font-weight:600; }
+tr.subtotal td { font-weight:650; background:color-mix(in srgb, var(--ink) 4%, transparent); border-top:1px solid var(--baseline); }
+tr.dup td { opacity:.55; }
+.warnnote { color:var(--s2); font-size:12px; }
+input.mvI { font:inherit; font-size:13.5px; width:90px; text-align:right; padding:3px 6px; border-radius:6px;
+ border:1px solid var(--grid); background:var(--page); color:var(--ink); font-variant-numeric:tabular-nums; }
+.editrow td { background:color-mix(in srgb, var(--s1) 6%, transparent); }
+.efgrid { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end; padding:4px 2px 8px; }
+.efgrid label { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--mut); }
+.efgrid input, .efgrid select { font:inherit; font-size:13.5px; padding:5px 8px; border-radius:7px;
+  border:1px solid var(--grid); background:var(--page); color:var(--ink); min-width:130px; }
+.efbtns { display:flex; gap:8px; margin-left:auto; }
+.grpName { font:inherit; font-size:13.5px; font-weight:600; padding:3px 8px; border-radius:7px;
+  border:1px solid var(--grid); background:var(--page); color:var(--ink); }
+button.addGrp { font-size:13px; }
+/* 未實現損益欄(第 5 欄)可隱藏;編輯列是 colspan,不受 nth-child 影響 */
+body.hidePL #regions table th:nth-child(5),
+body.hidePL #regions table td:nth-child(5) { display:none; }
+/* 對帳單匯入的預覽視窗 */
+.modalbg { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex;
+           align-items:center; justify-content:center; z-index:50; padding:16px; }
+.modal { background:var(--surface); border:1px solid var(--grid); border-radius:10px;
+         padding:18px 20px; max-width:760px; width:100%; box-shadow:0 8px 40px rgba(0,0,0,.4); }
+.modal h2 { margin-bottom:12px; }
+.modal table { width:100%; }
+button[disabled] { opacity:.45; cursor:default; }
+
+/* ── 群組摺疊 ─────────────────────────────── */
+.gtoggle { color: var(--mut); font-size: 12px; }
+.grp.collapsed thead { display: none; }
+.grp.collapsed tbody tr:not(.subtotal) { display: none; }
+.grp[data-gkey] > h3 { user-select: none; }
+
+/* ── 欄位排序指示 ─────────────────────────── */
+th.sortable { cursor: pointer; }
+th.sortable:hover { color: var(--ink); }
+th.s-desc::after { content: " ▼"; font-size: 9px; }
+th.s-asc::after  { content: " ▲"; font-size: 9px; }
+
+/* ── 手機精簡欄位:640px 以下收起 佔本組/成本/未實現/Breakeven ──
+   編輯模式不收(要改成本);要看完整數字轉橫向即可 */
+@media (max-width: 640px) {
+  body:not(.editmode) .xs-hide { display: none !important; }
+}
+
+/* ── 今日變動貢獻面板 ───────────────────── */
+.daytile { cursor: pointer; }
+.daytile:hover { border-color: var(--accent); }
+.daybk table { width: 100%; }
+.daybk .t { margin-bottom: 6px; }
+
+/* ── 頂部導航列 ─────────────────────────── */
+#topnav { position: sticky; top: 0; z-index: 30; display: block;
+  background: var(--page); padding: 8px 0 10px; margin: 0 0 4px; }
+#topnav .navrow, #topnav .subnav { display: flex; gap: 6px; flex-wrap: wrap; }
+#topnav .subnav { margin-top: 6px; }
+#topnav .subnav a { font-size: 12px; padding: 3px 10px; color: var(--mut); border-style: dashed; }
+#topnav a.on { border-color: var(--accent); color: var(--ink); }
+/* 跳轉時別讓標題躲進 sticky 導航底下 */
+.card[id], .grp[data-gkey] { scroll-margin-top: 92px; }
+#topnav:empty { display: none; }
+#topnav a { font-size: 13px; color: var(--ink2); text-decoration: none;
+  border: 1px solid var(--grid); border-radius: 999px; padding: 4px 12px; background: var(--surface); }
+#topnav a:hover { color: var(--ink); border-color: var(--accent); }
+
+/* ── 回頂端 ────────────────────────────── */
+#toTop { position: fixed; right: 18px; bottom: 22px; z-index: 40; width: 40px; height: 40px;
+  border-radius: 50%; background: var(--surface); border: 1px solid var(--grid);
+  color: var(--ink2); font-size: 18px; line-height: 38px; text-align: center;
+  text-decoration: none; opacity: 0; pointer-events: none; transition: opacity .2s;
+  box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+#toTop.show { opacity: 1; pointer-events: auto; }
+
+/* ── 表格容器與桌機 sticky 表頭 ──────────────
+   sticky 在 overflow-x:auto 容器內無法對視窗吸附;桌機表格放得下,
+   把容器改為不裁切,表頭吸附在導航列下方。窄螢幕維持橫向捲動、不吸附。 */
+.tblwrap { overflow-x: auto; }
+@media (min-width: 980px) {
+  .tblwrap { overflow-x: visible; }
+  .tblwrap thead th { position: sticky; top: 42px; background: var(--surface); z-index: 5; }
+}
+
+/* ── 拆分列合計 ─────────────────────────── */
+tr.aggrow { cursor: pointer; }
+tr.aggrow:hover td { background: color-mix(in srgb, var(--surface) 88%, var(--accent)); }
+tr.subrow td:first-child { padding-left: 26px; }
+tr.subrow td { color: var(--ink2); }
+
+/* ── 手機:橫向捲動時鎖定第一欄(部位名稱) ─────────────
+   sticky left 在 overflow-x:auto 容器內生效;背景必須不透明,
+   否則捲過去的數字會從名稱底下透出來。 */
+@media (max-width: 979px) {
+  .tblwrap tr:not(.editrow) th:first-child,
+  .tblwrap tr:not(.editrow) td:first-child,
+  .daybk th:first-child, .daybk td:first-child,
+  #fxexp tr:not(.editrow) th:first-child,
+  #fxexp tr:not(.editrow) td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    background: var(--surface);
+    min-width: 112px; max-width: 46vw;
+  }
+  /* 特殊底色的列:改用不透明等效色,避免透出 */
+  .tblwrap tr.subtotal td:first-child,
+  .daybk tr.subtotal td:first-child {
+    background: color-mix(in srgb, var(--ink) 4%, var(--surface));
+  }
+  /* dup 列整列半透明會讓鎖定欄透出底下內容;第一欄改用實色的淡化效果 */
+  .tblwrap tr.dup td:first-child { opacity: 1; color: var(--mut); background: var(--surface); }
+  /* 右緣陰影,提示底下還有內容在捲動 */
+  .tblwrap td:first-child::after, .tblwrap th:first-child::after,
+  .daybk td:first-child::after, #fxexp td:first-child::after {
+    content: ''; position: absolute; top: 0; right: -1px; bottom: 0; width: 8px;
+    background: linear-gradient(to right, rgba(0,0,0,.12), transparent);
+    pointer-events: none;
+  }
+}
+
+/* ── 集中度與風險卡 ─────────────────────── */
+#riskcard:empty { display: none; }
+.riskgrid { display: grid; gap: 18px 26px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.riskgrid .rt { font-size: 13px; color: var(--ink2); font-weight: 600; margin-bottom: 8px; }
+.rrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+.rrow .rl { flex: 0 0 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rrow .rbar { flex: 1; height: 8px; background: color-mix(in srgb, var(--ink) 7%, transparent); border-radius: 4px; overflow: hidden; }
+.rrow .rbar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.rrow .rv { flex: 0 0 48px; text-align: right; font-variant-numeric: tabular-nums; }
+.rrow.r-amber .rbar i { background: #d97706; }
+.rrow.r-amber .rv { color: #d97706; }
+.rrow.r-red .rbar i { background: var(--s2, #dc2626); }
+.rrow.r-red .rv { color: var(--s2, #dc2626); }
+
+/* ── 已出清部位追蹤 ─────────────────────── */
+#closedcard:empty { display: none; }
+
+/* 幣別曝險明細:點幣別列或曝險磚展開,列在表格下方(不塞進表格的橫捲區) */
+.tile.fxtog, td.fxtog { cursor: pointer; }
+td.fxtog:hover { background: color-mix(in srgb, var(--surface) 88%, var(--accent)); }
+.tile.fxtog:hover { border-color: var(--accent); }
+.cev { color: var(--mut); font-size: 11px; }
+.fxdet { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+         gap: 3px 28px; padding: 8px 2px 2px; }
+.fxdet .fr { display: flex; align-items: center; gap: 9px; font-size: 12.5px; min-width: 0; }
+.fxdet .fl { flex: 1 1 auto; min-width: 0; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+.fxdet .fg { color: var(--mut); font-size: 11.5px; margin-left: 6px; }
+.fxdet .fb { flex: 0 0 54px; height: 6px; border-radius: 3px; overflow: hidden;
+             background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.fxdet .fb i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.fxdet .fv { flex: 0 0 54px; text-align: right; font-variant-numeric: tabular-nums; }
+.fxdet .fp { flex: 0 0 42px; text-align: right; color: var(--mut);
+             font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .fxdet .fg { display: none; } }
+/* 這張表欄位多,窄螢幕上表頭本來會被擠成一字一行;表格本來就能橫捲,寧可寬一點 */
+.fxtbl th { white-space: nowrap; }
+
+/* 配置分析:地區與主題兩塊,各自加總 100% */
+.allocblk + .allocblk { margin-top: 20px; }
+.allocblk .rt { font-size: 13px; color: var(--ink2); font-weight: 600; margin-bottom: 8px; }
+/* 曝險明細的流動性標籤:上市 / 私募 / 手動 */
+.lqt { display:inline-block; margin-left:6px; padding:0 5px; border-radius:3px;
+       font-size:10.5px; line-height:15px; vertical-align:1px; white-space:nowrap; }
+.lq-pub { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+.lq-pe  { background:color-mix(in srgb, var(--s4) 22%, transparent); color:var(--s4); }
+.lq-man { background:color-mix(in srgb, var(--ink) 10%, transparent); color:var(--mut); }
+
+/* 常駐警示(#alerts):資料可能已經遺失的訊息不能是 4 秒就消失的小字。 */
+#alerts{margin:10px 0}
+.alert{border-radius:8px;padding:10px 12px;margin:8px 0;font-size:13px;line-height:1.6;
+  border:1px solid #c0392b;background:rgba(192,57,43,.10);color:inherit}
+.alert.warn{border-color:#b8860b;background:rgba(184,134,11,.10)}
+.alert b{display:block;margin-bottom:2px}
+.alert button{margin:6px 6px 0 0;font-size:12px;padding:3px 10px}
+.alert .mut{opacity:.75}
+#stashPanel{max-height:340px;overflow:auto;margin-top:8px;font-size:12px;
+  border-top:1px solid rgba(128,128,128,.35);padding-top:8px}
+#stashPanel table{width:100%;border-collapse:collapse}
+#stashPanel td{padding:2px 6px;border-bottom:1px solid rgba(128,128,128,.18);vertical-align:top}

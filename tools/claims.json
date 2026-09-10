@@ -1,0 +1,107 @@
+[
+ {
+  "name": "線上是預期的那一版",
+  "want": true,
+  "js": "return document.body.innerText.indexOf('建置 __BUILD__ ') >= 0;"
+ },
+ {
+  "name": "沒有 JS 錯誤(頁面完整渲染:12 張卡)",
+  "want": 12,
+  "js": "return document.querySelectorAll('.card').length;"
+ },
+ {
+  "name": "乾淨瀏覽器沒有紅字(注意:這條不能證明清理有效,見 tools/stash_live.js)",
+  "want": "",
+  "js": "return document.getElementById('alerts').innerText.trim();"
+ },
+ {
+  "name": "備份也被清掉(localStorage 沒有殘留)",
+  "want": true,
+  "js": "return localStorage.getItem('portfolio_stash_v1') === null;"
+ },
+ {
+  "name": "群組今日% 畫面與報表用同一個分母(逐組相符)",
+  "want": 0,
+  "js": "let bad=0; P.regions.forEach(r=>r.groups.forEach(g=>{const gnd=g.positions.filter(x=>!isDup(x));const gq=gnd.filter(x=>x.q);if(!gq.length)return;const day=gq.reduce((s,x)=>s+dayOf(x),0);if(!day)return;const qmv=gq.reduce((s,x)=>s+effMv(x),0);const a=day/(qmv-day)*100;const b=aggOf(gnd).dayPct;if(Math.abs(a-b)>0.01)bad++;}));return bad;"
+ },
+ {
+  "name": "沒有部位的今日% 還在用含鏡像列的分母",
+  "want": true,
+  "js": "const g=P.regions.flatMap(r=>r.groups).find(x=>x.positions.filter(p=>isDup(p)).length);if(!g)return true;const all=g.positions.reduce((s,x)=>s+effMv(x),0);const gnd=g.positions.filter(x=>!isDup(x));const qmv=gnd.filter(x=>x.q).reduce((s,x)=>s+effMv(x),0);return qmv<all;"
+ },
+ {
+  "name": "KPI 報酬率的分子分母涵蓋 100%",
+  "want": 100,
+  "js": "return sumRet(nonDup()).cov;"
+ },
+ {
+  "name": "沒有部位的 YTD 報酬率超過 300%(舊報告宣稱有 +272%)",
+  "want": 0,
+  "js": "return nonDup().filter(p=>{const r=ytdRetOf(p);return r!=null&&Math.abs(r)>300;}).length;"
+ },
+ {
+  "name": "soldCostK 有實際生效的部位數(> 15)",
+  "want": true,
+  "js": "return nonDup().filter(p=>soldCostK(p)>1).length > 15;"
+ },
+ {
+  "name": "沒有 asof 的連動部位(基金以外)不超過 1 檔",
+  "want": true,
+  "js": "const s=new Set();nonDup().forEach(p=>{if(p.q&&p.q.asof==null&&!/TWFUND/.test(p.ticker||'')&&!p.derived)s.add(p.ticker||p.name);});return s.size<=1;"
+ },
+ {
+  "name": "有 settled 標記的部位不會計入今日金額",
+  "want": 0,
+  "js": "return nonDup().filter(p=>p.q&&p.q.settled&&p.q.day_k).length;"
+ },
+ {
+  "name": "今日 KPI = 各部位 day_k 加總(誤差 < 1K)",
+  "want": true,
+  "js": "const s=nonDup().reduce((a,p)=>a+(p.q?dayOf(p):0),0);const m=document.getElementById('kpis').innerText.match(/今日變動[\\s\\S]*?(-?[\\d,]+)/);return Math.abs(s-Number((m&&m[1]||'0').replace(/,/g,'')))<1;"
+ },
+ {
+  "name": "prev_book 已經帶到前端(帳本有在用)",
+  "want": true,
+  "js": "return nonDup().some(p=>p.q&&p.q.prev_book!=null);"
+ },
+ {
+  "name": "差異比對會忽略 on:null(上次卡住的那個)",
+  "want": true,
+  "js": "const A=[{name:'Z',ticker:'ZZ:NYSE',cur:'USD',on:null,to:'2026-09-02',u0:3663,u1:1963}];const B=JSON.parse(JSON.stringify(A));delete B[0].on;return JSON.stringify(normList('t',A))===JSON.stringify(normList('t',B));"
+ },
+ {
+  "name": "但真的改過減碼股數仍然測得到",
+  "want": true,
+  "js": "const A=[{name:'Z',ticker:'ZZ:NYSE',cur:'USD',to:'2026-09-02',u0:3663,u1:1963}];const B=JSON.parse(JSON.stringify(A));B[0].u1=1000;return JSON.stringify(normList('t',A))!==JSON.stringify(normList('t',B));"
+ },
+ {
+  "name": "沒有部位掛著「⚠ 前收不明 / 單日變動異常」",
+  "want": 0,
+  "js": "return nonDup().filter(p=>p.q&&/前收不明|單日變動異常/.test(p.q.qnote||'')).length;"
+ },
+ {
+  "name": "有 ⚠ 徽章的部位數(0 最好,>0 要看一眼)",
+  "want": 0,
+  "js": "return [...new Set(nonDup().filter(p=>p.q&&/⚠/.test(p.q.qnote||'')).map(p=>p.q.qnote))].length;"
+ },
+ {
+  "name": "沒有部位顯示疑似分割/合併(股數可能過期)",
+  "want": 0,
+  "js": "return nonDup().filter(p=>p.q&&/疑似分割/.test(p.q.qnote||'')).length;"
+ },
+ {
+  "name": "總資產 = 各區加總(誤差 < 1K)",
+  "want": true,
+  "js": "const t=nonDup().reduce((s,p)=>s+effMv(p),0);const r=P.regions.reduce((s,rg)=>s+rg.groups.reduce((a,g)=>a+g.positions.filter(p=>!isDup(p)).reduce((b,p)=>b+effMv(p),0),0),0);return Math.abs(t-r)<1;"
+ },
+ {
+  "name": "匯率表沒有缺(所有部位的計價幣別都查得到)",
+  "want": 0,
+  "js": "return [...new Set(nonDup().map(p=>(p.q&&p.q.cur)||p.cur).filter(Boolean))].filter(c=>!FX[c]).length;"
+ },
+ {
+  "name": "走勢圖最後一列不早於三個營業日前",
+  "want": true,
+  "js": "if(!window.__HIST__||!__HIST__.length)return false;const last=new Date(__HIST__[__HIST__.length-1].t.slice(0,10));return (Date.now()-last)/86400000 < 5;"
+ }
+]
