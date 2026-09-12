@@ -105,7 +105,7 @@ for _t in P["trims"]:
 # 「我貼上去的那一份到底生效了沒有」,以前只能繞去 GitHub 比檔案大小。
 # 版本號由交付 yml 時手動遞增;後面六碼是四個腳本內容的雜湊,
 # 就算版本號忘了改也會跟著變,所以它不會說謊。
-BUILD_TAG = "v134"
+BUILD_TAG = "v135"
 import hashlib as _hl
 _sig = _hl.md5(b"".join(
     open(_f, "rb").read()
