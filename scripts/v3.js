@@ -9,6 +9,27 @@ function applyHidePL() {
   const b = document.getElementById('plToggle');
   if (b) b.textContent = HIDEPL ? '＋ 顯示未實現損益' : '－ 隱藏未實現損益';
 }
+// 未上市部位(報表 NAV 的靜態部位:PE / Activist / 海外基金)的顯示開關。
+// 與未實現損益欄同一套:純顯示偏好,只存本機、不進覆寫檔、不影響其他裝置;
+// 只把列藏起來,KPI / 小計 / 配置比例一律不變(使用者 2026-09-14 決定)。
+// 編輯模式一律全部顯示,否則藏起來的部位沒辦法編。
+const UNL_KEY = 'hide_unlisted_v1';
+let HIDEUNL = false;
+try { HIDEUNL = localStorage.getItem(UNL_KEY) === '1'; } catch (e) {}
+// 「未上市」的判斷與 stampNav 同一條:不是連動報價(live / pending)、也不是鏡像列的,就是報表 NAV 部位。
+// 鏡像(dup)一檔靜態部位的列跟著算未上市;鏡像上市個股的列則照常顯示。
+const isUnlisted = p => !!p && p.kind !== 'live' && p.kind !== 'pending' && p.kind !== 'derived' && !p.derived;
+function applyHideUNL() {
+  document.body.classList.toggle('hideUNL', HIDEUNL && !EDIT);
+  const b = document.getElementById('unlToggle');
+  if (b) {
+    const n = allPos().filter(isUnlisted).length;
+    b.textContent = (HIDEUNL ? '＋ 顯示未上市部位' : '－ 隱藏未上市部位') + (n ? ` (${n})` : '');
+    b.title = HIDEUNL
+      ? '目前已隱藏報表 NAV 的靜態部位(PE / Activist / 海外基金)的列;總資產、小計、配置比例都仍含它們'
+      : '只把報表 NAV 的靜態部位(PE / Activist / 海外基金)的列藏起來;總資產、小計、配置比例不變';
+  }
+}
 let EDIT = false;      // 編輯模式開關
 // 靜態部位從未蓋章時的預設「資料截至」:目前這批 NAV 來自 2026-08-19 的報表
 const NAV_ASOF_DEFAULT = '2026-08-19';
@@ -812,6 +833,7 @@ function render() {
     <button id="expJson">${(SYNC && SYNC.token) ? "匯出備份 (JSON)" : "匯出目前組合 (JSON)"}</button>
     ${EDIT ? '<button id="deriveCost" title="成本 = 市值 ÷ (1 + Breakeven);只填尚未設定成本的部位">↧ 由 Breakeven 反推成本</button>' : ''}
     <button id="plToggle">${HIDEPL ? '＋ 顯示未實現損益' : '－ 隱藏未實現損益'}</button>
+    <button id="unlToggle">${HIDEUNL ? '＋ 顯示未上市部位' : '－ 隱藏未上市部位'}</button>
     <button onclick="document.getElementById('stmtFile').click()" class="primary">↥ 匯入對帳單</button>
     <input type="file" id="stmtFile" accept=".xlsx,.csv" hidden>
     <button onclick="document.getElementById('impFile').click()">匯入組合 (JSON)</button>
@@ -870,7 +892,7 @@ function render() {
           : '<span class="mut">—</span>';
         const ck = costK(p), uk = unrealK(p);
         const key = `${reg.key}||${g.name}||${pi}`;
-        let h = `<tr class="${p.dup ? 'dup' : ''}${extraCls ? ' ' + extraCls : ''}"><td>${esc(p.name)}${p.dup ? ' <span class="badge">dup</span>' : ''}` +
+        let h = `<tr class="${p.dup ? 'dup' : ''}${extraCls ? ' ' + extraCls : ''}${isUnlisted(p) ? ' unl' : ''}"><td>${esc(p.name)}${p.dup ? ' <span class="badge">dup</span>' : ''}` +
           `<span class="tk">${esc(p.ticker || p.note || '')}</span></td>` +
           `<td class="num">${mvCell}</td>` +
           `<td class="num xs-hide">${gmvAll ? (mv/gmvAll*100).toFixed(1) + '%' : '—'}</td>` +
@@ -928,6 +950,10 @@ function render() {
           `<td class="num">${today}</td><td>${badge(q0)}</td></tr>`;
         if (open) it.parts.forEach(x => { out += rowHtml(x.p, x.pi, 'subrow'); });
       });
+      // 隱藏未上市部位時,這一組被藏掉幾列要看得到,免得整組看起來像空的、
+      // 或小計對不上眼前的列(小計仍含它們,這是使用者選的口徑)。
+      const gunl = g.positions.filter(isUnlisted).length;
+      if (gunl) out += `<tr class="unlnote"><td colspan="${EDIT ? 11 : 10}" class="mut">已隱藏 ${gunl} 檔未上市部位(小計與總資產仍含)</td></tr>`;
       let warn = '';
       if (g.report_total && Math.abs(gmvAll - g.report_total.mv) / g.report_total.mv > 0.01)
         warn = ` <span class="warnnote">⚠ 報表小計 ${fmt0(g.report_total.mv)}</span>`;
@@ -1174,6 +1200,7 @@ function render() {
 
   renderNav();
   applyHidePL();          // 每次重繪都要重新套用(工具列按鈕文字也在這裡同步)
+  applyHideUNL();
 
   // YTD P&L top contributors
   const top = [...nd].filter(p => ytdOf(p) != null).sort((a,b) => Math.abs(ytdOf(b)) - Math.abs(ytdOf(a))).slice(0, 12);
@@ -1654,6 +1681,12 @@ function wireEditing() {
     HIDEPL = !HIDEPL;
     try { localStorage.setItem(PL_KEY, HIDEPL ? '1' : '0'); } catch (e) {}
     applyHidePL();
+  });
+  const ut = $('unlToggle');
+  if (ut) ut.addEventListener('click', () => {
+    HIDEUNL = !HIDEUNL;
+    try { localStorage.setItem(UNL_KEY, HIDEUNL ? '1' : '0'); } catch (e) {}
+    applyHideUNL();
   });
   const cl = $('clearLocal');
   if (cl) cl.addEventListener('click', () => { if (confirm('清除本機所有手動修改?將回到自動更新的版本。')) clearLocal(); });
