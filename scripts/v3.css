@@ -79,6 +79,11 @@ button.addGrp { font-size:13px; }
 /* 未實現損益欄(第 5 欄)可隱藏;編輯列是 colspan,不受 nth-child 影響 */
 body.hidePL #regions table th:nth-child(5),
 body.hidePL #regions table td:nth-child(5) { display:none; }
+/* 隱藏未上市部位:只藏列,小計不動;提示列只在隱藏時出現 */
+body.hideUNL #regions tr.unl { display:none; }
+#regions tr.unlnote { display:none; }
+body.hideUNL #regions tr.unlnote { display:table-row; }
+#regions tr.unlnote td { font-size:11px; padding:4px 8px; }
 /* 對帳單匯入的預覽視窗 */
 .modalbg { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex;
            align-items:center; justify-content:center; z-index:50; padding:16px; }
