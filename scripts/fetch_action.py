@@ -35,6 +35,11 @@ WINDOWS = {"TPE": (9.0, 13.5), "TYO": (9.0, 15.0), "KRX": (9.0, 15.5),
            "LON": (8.0, 16.5), "AMS": (9.0, 17.5), "ETR": (9.0, 17.5),
            "EPA": (9.0, 17.5), "BIT": (9.0, 17.5), "STO": (9.0, 17.5),
            "US": (9.5, 16.0)}
+# 資料源(Yahoo)對亞股的報價是延遲的:台 / 日 / 韓 20 分鐘、港 15、滬深 30(Yahoo 交易所清單)。
+# 收盤後那十幾分鐘「看到的最後一價」其實是收盤前的成交,不是收盤價。帳本與日線種子要等
+# 「收盤 + 延遲 + 5 分鐘」才能把當天的場次當成已收盤(v138;2026-09-16 台股一檔因此隔天
+# 漲跌算錯:官方 0.00%,畫面 −0.48%,而且同一場只寫第一次,寫錯就改不掉)。
+QUOTE_DELAY_MIN = {"TPE": 20, "TYO": 20, "KRX": 20, "HKG": 15, "SHA": 30, "SHE": 30}
 TZ = {"TPE": "Asia/Taipei", "TYO": "Asia/Tokyo", "KRX": "Asia/Seoul",
       "HKG": "Asia/Hong_Kong", "SHA": "Asia/Shanghai", "SHE": "Asia/Shanghai",
       "LON": "Europe/London", "AMS": "Europe/Amsterdam", "ETR": "Europe/Berlin",
@@ -740,7 +745,13 @@ def _fetch_one(t):
             # 落後、事後除權息還原、即時價與日線互相矛盾影響 —— 那四種正是過去
             # 一週最常出錯的原因。資料源的前收退成交叉驗證。
             _pd, _pv = px_prev(t, sess, _local(_ex_of(t))[0])
-            if _pv:
+            # 台股:官方收盤的日期早於這一場(= 它就是上一場)時,前收以官方為準,帳本只當紀錄。
+            # 帳本可能記到延遲價(見 QUOTE_DELAY_MIN),官方收盤不會。
+            _off_is_prev = bool(_off and _off[1] and sess and _off[1] < sess)
+            if _off_is_prev:
+                prev = _off[0]
+                _q_book = _pv
+            elif _pv:
                 if not prev:
                     prev = _pv
                 elif abs(_pv / prev - 1) > 0.20:
@@ -1075,15 +1086,24 @@ for _t, _q in quotes.items():
     _lex = _ex_of(_t)
     _ld, _lh = _local(_lex)
     _today = _ld.isoformat()
-    _closed = _lh >= WINDOWS[_lex][1]                              # 當地時間過收盤了嗎
+    # 「過收盤了」要把資料源的延遲算進去(見 QUOTE_DELAY_MIN):收盤後 20 分鐘內看到的價
+    # 是收盤前十幾分鐘的成交,不是收盤價。台股 13:30 那一輪(約 13:35–13:42)因此寫錯過。
+    _closed = _lh >= WINDOWS[_lex][1] + (QUOTE_DELAY_MIN.get(_lex, 0) + 5) / 60.0
     for _d, _v in (BARS_SEEN.get(_yh.get(_t)) or {}).items():      # 日線種子
         if _d > _today or (_d == _today and not _closed):
             continue                                               # 這一場還沒收
         _rec.setdefault(_d, round(_v, 6))
     _a, _p = _q.get("asof"), _q.get("price")                       # 本輪親眼看到的
     if (not _q.get("live") and _a and isinstance(_p, (int, float))
-            and _p == _p and _p > 0 and "快取" not in (_q.get("note") or "")):
+            and _p == _p and _p > 0 and "快取" not in (_q.get("note") or "")
+            and not (_a == _today and not _closed)):               # 當天的要等延遲過了才算收盤
         _rec.setdefault(_a, round(float(_p), 6))
+    # 台股:交易所公布的收盤一律覆寫帳本裡同一天的值。「同一場只寫第一次」是為了擋資料源
+    # 事後還原調整;官方收盤沒有這個問題,而且比資料源可靠,寫錯的那一天靠它修回來。
+    if _t.endswith(":TPE"):
+        _offc = TW_CLOSE.get(_t.split(":")[0])
+        if _offc and _offc[1] and _offc[0] and _offc[0] > 0:
+            _rec[_offc[1].isoformat()] = round(float(_offc[0]), 6)
     if len(_rec) > PX_KEEP:                                        # 只留最近幾場
         _rec = {d: _rec[d] for d in sorted(_rec)[-PX_KEEP:]}
     if _rec:
