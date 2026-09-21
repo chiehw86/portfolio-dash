@@ -726,6 +726,18 @@ def _fetch_one(t):
                 # 日線是最新那一場時我們直接採用它,沒有「推斷」的成分,只是兩源不一致。
                 label = ("⚠ 前收兩源不一致 " if _cand[2] else "⚠ 前收推斷 ") + label
             _off = TW_CLOSE.get(t.split(":")[0]) if t.endswith(":TPE") else None
+            # v141:資料源給了一根「還沒發生的場次」—— 台股開盤前(08:30 起的試撮)Yahoo 會把
+            # 試撮價放進「今天」的日線,2026-09-21 08:32 那一輪甚至標成週日的日期;三檔台股因此在
+            # 開盤前顯示「⚠ 報價停在 09/20」、價格是試撮價(其中一檔比週五收盤低 7%),一檔顯示
+            # 「收盤 09/21」漲跌 0。不是盤中、場次卻晚於「應該有的最後一場」= 還沒開始的場次:
+            # 場次退回上一場,價格改用上一場的收盤(台股用官方,其餘用資料源的前收)。
+            _exp_s = expected_session(t)
+            if sess and not live and _exp_s and sess > _exp_s:
+                sess = _exp_s
+                if _off and _off[1] == _exp_s:
+                    price = _off[0]
+                elif prev:
+                    price = prev
             if _off:
                 if live:
                     prev = _off[0]
@@ -1089,14 +1101,23 @@ for _t, _q in quotes.items():
     # 「過收盤了」要把資料源的延遲算進去(見 QUOTE_DELAY_MIN):收盤後 20 分鐘內看到的價
     # 是收盤前十幾分鐘的成交,不是收盤價。台股 13:30 那一輪(約 13:35–13:42)因此寫錯過。
     _closed = _lh >= WINDOWS[_lex][1] + (QUOTE_DELAY_MIN.get(_lex, 0) + 5) / 60.0
+    # v141:晚於「應該有的最後一場」的日期一律不是收盤(台股以交易所公布的最後交易日為準)。
+    # 2026-09-21 早上 Yahoo 把台股開盤前的試撮價放進一根標成週日的日線,「不是今天」就繞過了
+    # 上面那道守門,三檔台股的帳本因此多了一筆週日的「收盤」。已經寫進去的也在這裡清掉。
+    try:
+        _expi = expected_session(_t).isoformat()
+    except Exception:
+        _expi = _today
+    for _k in [k for k in _rec if isinstance(k, str) and k > _expi]:
+        del _rec[_k]
     for _d, _v in (BARS_SEEN.get(_yh.get(_t)) or {}).items():      # 日線種子
-        if _d > _today or (_d == _today and not _closed):
-            continue                                               # 這一場還沒收
+        if _d > _today or (_d == _today and not _closed) or _d > _expi:
+            continue                                               # 這一場還沒收(或根本還沒發生)
         _rec.setdefault(_d, round(_v, 6))
     _a, _p = _q.get("asof"), _q.get("price")                       # 本輪親眼看到的
     if (not _q.get("live") and _a and isinstance(_p, (int, float))
             and _p == _p and _p > 0 and "快取" not in (_q.get("note") or "")
-            and not (_a == _today and not _closed)):               # 當天的要等延遲過了才算收盤
+            and not (_a == _today and not _closed) and _a <= _expi):  # 當天的要等延遲過了才算收盤
         _rec.setdefault(_a, round(float(_p), 6))
     # 台股:交易所公布的收盤一律覆寫帳本裡同一天的值。「同一場只寫第一次」是為了擋資料源
     # 事後還原調整;官方收盤沒有這個問題,而且比資料源可靠,寫錯的那一天靠它修回來。
