@@ -47,6 +47,9 @@ for t in P.get("trims") or []:
 deny = {d for d in deny if not (d.isdigit() and len(d) < 4)}
 deny = sorted(deny, key=len, reverse=True)
 
+# 券商對帳單 / 帳戶型代碼(如 4~6 個大寫字母接 2~4 位數字):2026-09-15 每日檢查在 docstring 裡抓到一個,
+# 它不在持倉名單裡,靠樣式擋。排除 base64 圖示行與雜湊。
+STMT_CODE_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{4,6}\d{3,4}(?![A-Za-z0-9])")
 hits = []
 for f in FILES:
     if not os.path.exists(f):
@@ -56,6 +59,8 @@ for f in FILES:
             continue
         if "data:image" in line:                 # 內嵌圖示的 base64,3 字母組合什麼都像
             continue
+        if STMT_CODE_RE.search(line) and "sha256" not in line:
+            hits.append(f); continue
         for d in deny:
             if d in line:
                 hits.append(f); break
