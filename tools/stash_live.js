@@ -53,8 +53,22 @@ const fs = require('fs');
             banner: html.indexOf('未同步') >= 0, panelLines: rows,
             panel: (document.getElementById('stashPanel')||{}).innerText};
   });
+  // ── 情境 C(v139):明文備份 + 有同步金鑰 → 拒收並清掉(同 origin 的其他頁面寫得進 localStorage)
+  await p.evaluate(() => {
+    localStorage.setItem('portfolio_stash_v1', JSON.stringify({v: 1, at: '2026-09-01T00:00:00Z',
+      body: {regions: [{key: 'r', name: 'r', groups: [{name: 'g', positions: [{name: 'PLANTED', kind: 'static', mv: 1}]}]}]}}));
+  });
+  await unlock();
+  const afterC = await p.evaluate(() => ({
+    hasKey: !!(SYNC && SYNC.key),
+    stash: localStorage.getItem('portfolio_stash_v1') !== null,
+    banner: document.getElementById('alerts').innerText.indexOf('未同步') >= 0,
+  }));
+
   console.log(JSON.stringify({
     種進去了: seeded,
+    情境C_明文備份有金鑰時拒收: {有金鑰: afterC.hasKey, 備份還在: afterC.stash, 紅字出現: afterC.banner,
+                                期望: '備份還在=false、紅字出現=false(v138 以前會是 true/true)'},
     情境A_內容其實相同: {備份還在: afterA.stash, 紅字: afterA.alert || '(沒有)'},
     情境B_真的有未同步修改: {備份還在: afterB.stash, 紅字出現: afterB.banner,
                             差異表: (afterB.panel||'').replace(/\n+/g,' | ').slice(0,200)},

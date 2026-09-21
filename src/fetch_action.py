@@ -35,6 +35,11 @@ WINDOWS = {"TPE": (9.0, 13.5), "TYO": (9.0, 15.0), "KRX": (9.0, 15.5),
            "LON": (8.0, 16.5), "AMS": (9.0, 17.5), "ETR": (9.0, 17.5),
            "EPA": (9.0, 17.5), "BIT": (9.0, 17.5), "STO": (9.0, 17.5),
            "US": (9.5, 16.0)}
+# 資料源(Yahoo)對亞股的報價是延遲的:台 / 日 / 韓 20 分鐘、港 15、滬深 30(Yahoo 交易所清單)。
+# 收盤後那十幾分鐘「看到的最後一價」其實是收盤前的成交,不是收盤價。帳本與日線種子要等
+# 「收盤 + 延遲 + 5 分鐘」才能把當天的場次當成已收盤(v138;2026-09-16 台股一檔因此隔天
+# 漲跌算錯:官方 0.00%,畫面 −0.48%,而且同一場只寫第一次,寫錯就改不掉)。
+QUOTE_DELAY_MIN = {"TPE": 20, "TYO": 20, "KRX": 20, "HKG": 15, "SHA": 30, "SHE": 30}
 TZ = {"TPE": "Asia/Taipei", "TYO": "Asia/Tokyo", "KRX": "Asia/Seoul",
       "HKG": "Asia/Hong_Kong", "SHA": "Asia/Shanghai", "SHE": "Asia/Shanghai",
       "LON": "Europe/London", "AMS": "Europe/Amsterdam", "ETR": "Europe/Berlin",
@@ -100,6 +105,93 @@ def _load_tw_official():
 _load_tw_official()
 # 公開 repo 的 log:只印場次日期,不印筆數(這個專案一律不在 log 留下數量資訊)
 print("tw-official: " + (f"最後交易日 {TW_LAST}" if TW_LAST else "未取得,本輪沿用原邏輯"))
+
+
+# ── 台股盤中:證交所即時行情(v137)──────────────────────────────────────
+# 為什麼要這一層:Yahoo 對台股的報價延遲 20 分鐘,加上排程本身晚 5~12 分鐘,
+# 09:00 那一輪永遠只拿得到前一場的收盤,台股開盤後頭 35~45 分鐘畫面上一定沒有盤中價
+# (2026-09-16 09:36 使用者回報)。證交所的 mis 端點是即時的,而且台股只有幾檔,
+# 一個請求就把全部抓完。只在台股交易時段內用,而且每一檔都要過四道檢查才採用:
+#   今天的場次(d = 台北今天)、成交價是數字且 > 0、昨收與官方收盤一致(有官方時)、
+#   漲跌落在 ±11% 內(台股漲跌幅限制 10%)。任何一道不過就當沒有,退回 Yahoo 那條路。
+# 端點掛了、格式變了、被擋了 → 整段略過,行為與 v136 完全相同。
+# 格式依 2026-09-16 10:28 使用者從瀏覽器取回的真實回應:`z` 是「這 5 秒快照裡的成交價」,
+# 沒有成交就是 "-"(連最大的 ETF 都常常是 "-");最後成交價在 `trade.z`;買價 `b` 以 `_` 分隔、
+# 尾端多一個 `_`。所以成交價的順序是 z → trade.z → 最佳買價。
+# log 只印原因類別,不印檔數、代號、價格(log 是公開的)。
+TW_RT = {}                        # code -> (成交價, 昨收)
+
+
+def _load_tw_realtime(codes):
+    _d, _h = _local("TPE")
+    if not codes or _d.weekday() >= 5 or not (WINDOWS["TPE"][0] <= _h <= WINDOWS["TPE"][1]):
+        return "非交易時段,略過"
+    today = _d.strftime("%Y%m%d")
+
+    def _num(x):
+        try:
+            v = float(str(x).replace(",", ""))
+            return v if v > 0 else None
+        except Exception:
+            return None
+    why = []                                                # 檢查未過的類別(不重複、不計數)
+
+    def _fail(r):
+        if r not in why: why.append(r)
+    try:
+        import http.cookiejar as _cj
+        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_cj.CookieJar()))
+        op.addheaders = [("User-Agent", "Mozilla/5.0"), ("Accept", "application/json, text/plain, */*"),
+                         ("Referer", "https://mis.twse.com.tw/stock/index.jsp")]
+        try:
+            op.open("https://mis.twse.com.tw/stock/index.jsp", timeout=10).read()   # 先拿 session cookie
+        except Exception:
+            pass
+        # 上市 / 上櫃分不出來(部位只記 :TPE),兩個頻道都問,端點會忽略不存在的那個
+        ch = "|".join(f"{ex}_{c}.tw" for c in sorted(codes) for ex in ("tse", "otc"))
+        url = ("https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=" + ch +
+               f"&json=1&delay=0&_={int(time.time() * 1000)}")
+        try:
+            raw = op.open(url, timeout=20).read().decode("utf-8", "ignore")
+        except Exception:
+            return "未取得(連線失敗)"
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return "未取得(回應不是 JSON)"
+        rows = data.get("msgArray") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            return "未取得(回應沒有 msgArray)"
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            code = str(r.get("c") or "").strip()
+            if code not in codes:
+                continue
+            if str(r.get("d") or "") != today:
+                _fail("場次日期"); continue
+            z = _num(r.get("z"))
+            if z is None:                                   # 這 5 秒沒成交 → 最後成交價
+                z = _num((r.get("trade") or {}).get("z") if isinstance(r.get("trade"), dict) else None)
+            if z is None:                                   # 連最後成交都沒有 → 最佳買價
+                z = _num(str(r.get("b") or "").split("_")[0])
+            y = _num(r.get("y"))
+            if z is None or y is None:
+                _fail("成交價或昨收"); continue
+            if abs(z / y - 1) > 0.11:
+                _fail("漲跌幅度"); continue
+            off = TW_CLOSE.get(code)
+            if off and abs(y / off[0] - 1) > 0.005:          # 昨收與官方收盤對不上 → 不信
+                _fail("昨收與官方不符"); continue
+            TW_RT[code] = (z, y)
+        if not TW_RT:
+            return "未取得(" + ("檢查未過:" + "、".join(why) if why else "回應裡沒有這些代號") + ")"
+        if why or len(TW_RT) < len(codes):
+            return "部分採用" + (f"(檢查未過:{'、'.join(why)})" if why else "(部分代號沒有回應)")
+        return "採用"
+    except Exception:
+        TW_RT.clear()
+        return "未取得(程式例外)"
 
 
 def expected_session(t):
@@ -259,6 +351,9 @@ def px_prev(t, sess, today_local):
 pos_all = [p for r in P["regions"] for g in r["groups"] for p in g["positions"]]
 cur_of = {p["ticker"]: p.get("cur", "USD") for p in pos_all if p.get("ticker")}
 tickers = sorted({p["ticker"] for p in pos_all if p.get("ticker") and p.get("kind") == "live"})
+# 台股即時行情:一個請求抓完全部(只在台股交易時段內;log 不印檔數)
+print("tw-realtime: " + _load_tw_realtime(
+    {t.split(":")[0] for t in tickers if t.endswith(":TPE")}))
 
 # 已出清部位也要抓價(「出清後表現」追蹤用)。closed_ytd 可能由網頁匯入寫入,
 # 存在 merge_overlay 產出的 portfolio.json,優先讀它;沒有再退回 bundle。
@@ -617,6 +712,11 @@ def _fetch_one(t):
                 label += " · 漲跌未取得"
         else:
             price, prev, sess = get_price_prev(to_yahoo(t), expected_session(t), live)
+            # 台股交易時段內,現價改用證交所即時行情(Yahoo 延遲 20 分鐘);
+            # 場次就是今天。前收接著由下面的官方收盤那段覆蓋,與原本一致。
+            _rt = TW_RT.get(t.split(":")[0]) if (live and t.endswith(":TPE")) else None
+            if _rt:
+                price, sess = _rt[0], _local("TPE")[0]
             # 台股:前收一律以交易所官方收盤為準。盤中時官方最新的那一筆就是前收
             # (今天還沒收),不必去猜日線缺的是哪一根。收盤後只做交叉比對:
             # 兩邊差超過 0.5% 就標出來,不默默採用其中一個。
@@ -645,7 +745,13 @@ def _fetch_one(t):
             # 落後、事後除權息還原、即時價與日線互相矛盾影響 —— 那四種正是過去
             # 一週最常出錯的原因。資料源的前收退成交叉驗證。
             _pd, _pv = px_prev(t, sess, _local(_ex_of(t))[0])
-            if _pv:
+            # 台股:官方收盤的日期早於這一場(= 它就是上一場)時,前收以官方為準,帳本只當紀錄。
+            # 帳本可能記到延遲價(見 QUOTE_DELAY_MIN),官方收盤不會。
+            _off_is_prev = bool(_off and _off[1] and sess and _off[1] < sess)
+            if _off_is_prev:
+                prev = _off[0]
+                _q_book = _pv
+            elif _pv:
                 if not prev:
                     prev = _pv
                 elif abs(_pv / prev - 1) > 0.20:
@@ -980,15 +1086,24 @@ for _t, _q in quotes.items():
     _lex = _ex_of(_t)
     _ld, _lh = _local(_lex)
     _today = _ld.isoformat()
-    _closed = _lh >= WINDOWS[_lex][1]                              # 當地時間過收盤了嗎
+    # 「過收盤了」要把資料源的延遲算進去(見 QUOTE_DELAY_MIN):收盤後 20 分鐘內看到的價
+    # 是收盤前十幾分鐘的成交,不是收盤價。台股 13:30 那一輪(約 13:35–13:42)因此寫錯過。
+    _closed = _lh >= WINDOWS[_lex][1] + (QUOTE_DELAY_MIN.get(_lex, 0) + 5) / 60.0
     for _d, _v in (BARS_SEEN.get(_yh.get(_t)) or {}).items():      # 日線種子
         if _d > _today or (_d == _today and not _closed):
             continue                                               # 這一場還沒收
         _rec.setdefault(_d, round(_v, 6))
     _a, _p = _q.get("asof"), _q.get("price")                       # 本輪親眼看到的
     if (not _q.get("live") and _a and isinstance(_p, (int, float))
-            and _p == _p and _p > 0 and "快取" not in (_q.get("note") or "")):
+            and _p == _p and _p > 0 and "快取" not in (_q.get("note") or "")
+            and not (_a == _today and not _closed)):               # 當天的要等延遲過了才算收盤
         _rec.setdefault(_a, round(float(_p), 6))
+    # 台股:交易所公布的收盤一律覆寫帳本裡同一天的值。「同一場只寫第一次」是為了擋資料源
+    # 事後還原調整;官方收盤沒有這個問題,而且比資料源可靠,寫錯的那一天靠它修回來。
+    if _t.endswith(":TPE"):
+        _offc = TW_CLOSE.get(_t.split(":")[0])
+        if _offc and _offc[1] and _offc[0] and _offc[0] > 0:
+            _rec[_offc[1].isoformat()] = round(float(_offc[0]), 6)
     if len(_rec) > PX_KEEP:                                        # 只留最近幾場
         _rec = {d: _rec[d] for d in sorted(_rec)[-PX_KEEP:]}
     if _rec:

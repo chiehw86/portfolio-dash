@@ -1,7 +1,7 @@
 // 誤報:v129 對「沒有人改過的東西」跳紅字(2026-09-09 線上實際發生,使用者截圖)。
 // 畫面上列出的兩類差異,都不是使用者的修改:
-//   (a) 鏡像列 Japan Defense 的 mv / be / pl / ret —— resolveDerived() 每次重繪即時算的
-//   (b) 五列 SHLD + INNIO + 瑞幸咖啡的 geo —— migrateClass() 一次性搬進來的
+//   (a) 鏡像列的 mv / be / pl / ret —— resolveDerived() 每次重繪即時算的
+//   (b) 五列拆分成分 + 兩檔個股的 geo —— migrateClass() 一次性搬進來的
 const { chromium } = require('playwright');
 const path = require('path');
 const PAGE = 'file://' + path.resolve(__dirname, '..', '..', 'replica', 'dashboard.html');
@@ -24,9 +24,10 @@ const ok = (n, c, d) => { console.log((c ? '  ok   ' : '  FAIL ') + n + (d ? '  
     // 「我的那份」= 一份還沒搬過 geo/theme、鏡像列數字是昨天行情的舊副本
     const mine = clone(cloud);
     let geoCleared = 0, calcChanged = 0;
+    // v139 起程式碼裡沒有對照表可查:直接把前九筆有 geo 的清掉、有 theme 的也清掉(= 還沒搬過的舊副本)
     mine.regions.forEach(r => r.groups.forEach(g => g.positions.forEach(q => {
-      if (q.geo && (GEO_BY_NAME[q.name] || (q.ticker && GEO_BY_TICKER[q.ticker]))) { delete q.geo; geoCleared++; }
-      if (q.theme && q.ticker && THEME_BY_TICKER[q.ticker]) delete q.theme;
+      if (q.geo && geoCleared < 9) { delete q.geo; geoCleared++; }
+      if (q.theme) delete q.theme;
       if (q.derived) {                       // 昨天的行情算出來的鏡像列數字
         q.mv = (+q.mv || 0) - 16.1; q.be = (+q.be || 0) - 2.3;
         q.pl = (+q.pl || 0) - 15.25; q.ret = (+q.ret || 0) - 1.02; calcChanged++;
@@ -39,8 +40,8 @@ const ok = (n, c, d) => { console.log((c ? '  ok   ' : '  FAIL ') + n + (d ? '  
   });
   ok('確實造出了截圖裡那些差異(geo 被清空、鏡像列數字不同)',
      r1.geoCleared >= 5 && r1.calcChanged >= 1, `geo ${r1.geoCleared} 筆 · 鏡像列 ${r1.calcChanged} 筆`);
-  ok('★ 正規化之後兩份的內容簽章相同 → 不會誤報分岔', r1.same === true);
-  ok('★ 差異表也不再列出這些雜訊', r1.rows === 0, `rows=${r1.rows} ${JSON.stringify(r1.sample)}`);
+  // v139:沒有對照表補 geo,簽章可以不同;靠「差異表是空的就清掉備份」(v131 機制,[7] 有驗)
+  ok('★ 差異表不列出這些雜訊 → 備份會被自動清掉,不會掛紅字', r1.rows === 0, `rows=${r1.rows} ${JSON.stringify(r1.sample)}`);
 
   console.log('\n[2] 真的被改過的東西仍然要比得出來(不能為了消音就變成什麼都測不到)');
   const r2 = await p.evaluate(async () => {
@@ -55,7 +56,9 @@ const ok = (n, c, d) => { console.log((c ? '  ok   ' : '  FAIL ') + n + (d ? '  
       ['改備註',   q => { q.note = '手動加註'; }],
     ]) {
       const mine = clone(cloud);
-      const first = mine.regions[0].groups[0].positions[0];
+      // 挑一筆本來就有 geo 的部位:v139 起「一邊有一邊沒有」的 geo 不算差異,只有兩邊都有且不同才算
+      let first = null;
+      mine.regions.forEach(r => r.groups.forEach(g => g.positions.forEach(q => { if (!first && q.geo && !q.derived) first = q; })));
       mut(first);
       const [sa, sb] = [await contentSig(mine), await contentSig(cloud)];
       out[name] = {differs: sa !== sb, rows: stashDiff(mine, cloud).length};
@@ -67,7 +70,7 @@ const ok = (n, c, d) => { console.log((c ? '  ok   ' : '  FAIL ') + n + (d ? '  
     return out;
   });
   Object.entries(r2).forEach(([k, v]) =>
-    ok(`${k} 仍然偵測得到`, v.differs === true, `簽章不同=${v.differs} 差異列=${v.rows}`));
+    ok(`${k} 仍然偵測得到`, v.differs === true && v.rows >= 1, `簽章不同=${v.differs} 差異列=${v.rows}`));
 
   console.log('\n[3] v129 誤存下來的舊備份,載入時要靜靜清掉(不要每次都跳一次)');
   const r3 = await p.evaluate(async () => {
@@ -81,18 +84,15 @@ const ok = (n, c, d) => { console.log((c ? '  ok   ' : '  FAIL ') + n + (d ? '  
       if (q.derived) { q.mv = (+q.mv || 0) - 16.1; }
     })));
     await stashPut(body, 'v129-noise');
-    // 模擬開機時那段清理
-    const st = await stashGet();
-    const [a, b] = [await contentSig(st.body),
-                    await contentSig({regions: P.regions, hedges: P.hedges, fx_track: P.fx_track,
-                                      fx_manual: P.fx_manual, closed_ytd: P.closed_ytd,
-                                      trims: P.trims, dropped: [...DROPPED], stmt_asof: P.stmt_asof})];
-    const cleaned = (a && b && a === b);
-    if (cleaned) stashDrop();
-    return {cleaned, gone: localStorage.getItem('portfolio_stash_v1') === null};
+    // 走真正的路:開機把備份載進 STASH,renderAlerts 算差異表,空的就清掉(v131 機制;
+    // v139 起沒有對照表補 geo,簽章會不同,靠的就是這一段)
+    STASH = await stashGet();
+    renderAlerts();
+    return {cleaned: STASH === null, gone: localStorage.getItem('portfolio_stash_v1') === null,
+            banner: (document.getElementById('alerts').innerText || '').trim().length};
   });
-  ok('★ 判定為沒有差異', r3.cleaned === true);
-  ok('★ 備份被清掉,紅字不會再出現', r3.gone === true);
+  ok('★ 判定為沒有差異(差異表空 → 清掉)', r3.cleaned === true);
+  ok('★ 備份被清掉,紅字不會再出現', r3.gone === true && r3.banner === 0, `banner=${r3.banner}`);
 
   console.log('\n[4] 真的有未同步修改的備份,不能被這段清理誤刪');
   const r4 = await p.evaluate(async () => {
@@ -183,7 +183,7 @@ const ok = (n, c, d) => { console.log((c ? '  ok   ' : '  FAIL ') + n + (d ? '  
   const r8 = await p.evaluate(async () => {
     const clone = o => JSON.parse(JSON.stringify(o));
     const base = {regions: clone(stripQ(P.regions)),
-                  trims: [{ticker: '2330:TPE', name: 'X', u0: 100, u1: 50, to: '2026-08-01',
+                  trims: [{ticker: '9901:TPE', name: 'X', u0: 100, u1: 50, to: '2026-08-01',
                            cur: 'TWD', 沒人認識的欄位: 1}],
                   closed_ytd: [{name: 'A', on: '2026-09-01', usd_k: 10, junk: 'z'}]};
     const cleaned = clone(base);
@@ -238,6 +238,20 @@ const ok = (n, c, d) => { console.log((c ? '  ok   ' : '  FAIL ') + n + (d ? '  
   ok('鍵的順序不影響', r9.keyOrder === true);
   ok('★ 真的改過 u1 仍然測得到', r9.realTrim === true);
   ok('★ 真的填了 geo 仍然測得到', r9.realGeo === true);
+
+  console.log('\n[10] v139:有同步金鑰時,明文備份不接受(同 origin 的其他頁面寫得進 localStorage)');
+  const r10 = await p.evaluate(async () => {
+    const hasKey = !!(SYNC && SYNC.key);
+    localStorage.setItem('portfolio_stash_v1', JSON.stringify({v: 1, at: '2026-09-01T00:00:00Z', body: {regions: []}}));
+    const got = await stashGet();
+    return {hasKey, got: got !== null, left: localStorage.getItem('portfolio_stash_v1') !== null};
+  });
+  if (r10.hasKey) {
+    ok('明文備份被拒收', r10.got === false);
+    ok('而且被清掉', r10.left === false);
+  } else {
+    ok('(這個 replica 沒有同步金鑰,略過;明文備份照舊可讀)', r10.got === true);
+  }
 
   if (errs.length) { console.log('\nPAGE ERRORS:', errs.slice(0, 3)); fails.push('pageerror'); }
   console.log('\n' + (fails.length ? 'FAIL: ' + fails.join(' | ') : 'PASS'));

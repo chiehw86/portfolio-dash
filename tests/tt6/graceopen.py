@@ -12,11 +12,11 @@ if jst.weekday() >= 5:
 # 日線最後一根是「昨天」,fast_info 的 last 等於那根收盤 → 走 pending 分支
 y = (jst.date() - datetime.timedelta(days=1))
 while y.weekday() >= 5: y -= datetime.timedelta(days=1)
-SPEC = {"8306.T": {"bars": [[(y - datetime.timedelta(days=1)).isoformat(), 3400.0],
+SPEC = {"9801.T": {"bars": [[(y - datetime.timedelta(days=1)).isoformat(), 3400.0],
                             [y.isoformat(), 3467.0]], "last": 3467.0, "pc": 3400.0}}
 json.dump(SPEC, open("spec.json", "w"))
 json.dump({"portfolio": {"regions": [{"name": "r", "groups": [{"name": "g", "positions":
-          [{"name": "t", "ticker": "8306:TYO", "kind": "live", "cur": "JPY"}]}]}]},
+          [{"name": "t", "ticker": "9801:TYO", "kind": "live", "cur": "JPY"}]}]}]},
            "baseline": {}}, open("bundle.json", "w"), ensure_ascii=False)
 
 src = open("fetch_action.py").read()
@@ -28,7 +28,7 @@ for label, open_hour, want in [("剛開盤(開盤後 5 分)", h - 5/60.0, "剛�
     assert patched != src, "WINDOWS 沒被改到"
     open("fa_t.py", "w").write(patched)
     subprocess.run([sys.executable, "fa_t.py"], capture_output=True, text=True)
-    q = json.load(open("quotes3.json"))["quotes"]["8306:TYO"]
+    q = json.load(open("quotes3.json"))["quotes"]["9801:TYO"]
     got = q["note"]
     ok = got.startswith(want) and q.get("pending_open") is True
     print(("  ok  " if ok else "  FAIL") + f" {label:18} → {got}")

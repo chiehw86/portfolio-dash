@@ -9,6 +9,27 @@ function applyHidePL() {
   const b = document.getElementById('plToggle');
   if (b) b.textContent = HIDEPL ? '＋ 顯示未實現損益' : '－ 隱藏未實現損益';
 }
+// 未上市部位(報表 NAV 的靜態部位:PE / Activist / 海外基金)的顯示開關。
+// 與未實現損益欄同一套:純顯示偏好,只存本機、不進覆寫檔、不影響其他裝置;
+// 只把列藏起來,KPI / 小計 / 配置比例一律不變(使用者 2026-09-14 決定)。
+// 編輯模式一律全部顯示,否則藏起來的部位沒辦法編。
+const UNL_KEY = 'hide_unlisted_v1';
+let HIDEUNL = false;
+try { HIDEUNL = localStorage.getItem(UNL_KEY) === '1'; } catch (e) {}
+// 「未上市」的判斷與 stampNav 同一條:不是連動報價(live / pending)、也不是鏡像列的,就是報表 NAV 部位。
+// 鏡像(dup)一檔靜態部位的列跟著算未上市;鏡像上市個股的列則照常顯示。
+const isUnlisted = p => !!p && p.kind !== 'live' && p.kind !== 'pending' && p.kind !== 'derived' && !p.derived;
+function applyHideUNL() {
+  document.body.classList.toggle('hideUNL', HIDEUNL && !EDIT);
+  const b = document.getElementById('unlToggle');
+  if (b) {
+    const n = allPos().filter(isUnlisted).length;
+    b.textContent = (HIDEUNL ? '＋ 顯示未上市部位' : '－ 隱藏未上市部位') + (n ? ` (${n})` : '');
+    b.title = HIDEUNL
+      ? '目前已隱藏報表 NAV 的靜態部位(PE / Activist / 海外基金)的列;總資產、小計、配置比例都仍含它們'
+      : '只把報表 NAV 的靜態部位(PE / Activist / 海外基金)的列藏起來;總資產、小計、配置比例不變';
+  }
+}
 let EDIT = false;      // 編輯模式開關
 // 靜態部位從未蓋章時的預設「資料截至」:目前這批 NAV 來自 2026-08-19 的報表
 const NAV_ASOF_DEFAULT = '2026-08-19';
@@ -73,33 +94,14 @@ const SLOTS12 = SLOTS.concat(['s9','s10','s11','s12']);   // 配置分析的類�
 // 兩者都可以直接在部位上寫 geo / theme 欄位指定,沒寫才走下面的推導。
 const GEONAME = {US:'美國', JP:'日本', TW:'台灣', KR:'韓國', CN:'中國',
                  EU:'歐洲', IL:'以色列', OT:'其他 / 全球'};
-const GEO_BY_NAME = {          // 拆分列直接照拆列歸屬(遷移用,見 migrateClass)
-  'SHLD 美國成分':'US', 'SHLD 歐洲成分':'EU', 'SHLD 韓國成分':'KR',   // mig:v124 移除
-  'SHLD 以色列成分':'IL', 'SHLD 其他/未列示':'OT'};   // mig:v124 移除
-const GEO_BY_TICKER = {        // 掛牌地與底層國家不一致的幾檔
-  'BESIY:OTCMKTS':'EU', 'CAMT:NASDAQ':'IL', 'INIO:NASDAQ':'EU', 'LKNCY:OTCMKTS':'CN'};   // mig:v124 移除
+// v139:GEO_BY_NAME / GEO_BY_TICKER / THEME_BY_TICKER 三張遷移用對照表已刪除。
+// 它們把持股代號寫在公開 repo 的程式碼裡;2026-09-08 起 migrateClass() 已把分類搬進每個部位的
+// geo / theme 欄位(存在加密覆寫檔),2026-09-16 對線上覆寫檔逐檔確認全部搬完,程式碼不再帶代號。
 const EXGEO = {TPE:'TW', TWFUND:'TW', TYO:'JP', KRX:'KR', HKG:'CN', SHA:'CN', SHE:'CN',
                LON:'EU', AMS:'EU', ETR:'EU', EPA:'EU', BIT:'EU', STO:'EU'};
 const EXPGEO = {JPY:'JP', KRW:'KR', TWD:'TW', CNY:'CN', HKD:'CN', EUR:'EU'};
-// 2026-09-08:GEO_BY_NAME / GEO_BY_TICKER / THEME_BY_TICKER 這三張表把持股代號寫在
-// 公開 repo 的程式碼裡。改成一次性搬進部位的 geo / theme 欄位(存進加密覆寫檔),
-// 下一版就把這三張表刪掉。migrateClass() 在載入後執行,有搬動就推送一次。
-function migrateClass() {
-  let n = 0;
-  P.regions.forEach(r => r.groups.forEach(g => g.positions.forEach(p => {
-    if (!p || typeof p !== 'object') return;
-    if (!p.geo) {
-      const g2 = GEO_BY_NAME[p.name] || (p.ticker && GEO_BY_TICKER[p.ticker]);
-      if (g2) { p.geo = g2; n++; }
-    }
-    if (!p.theme && p.ticker && THEME_BY_TICKER[p.ticker]) { p.theme = THEME_BY_TICKER[p.ticker]; n++; }
-  })));
-  return n;
-}
 function geoOf(p, regKey) {
   if (p.geo) return p.geo;
-  if (GEO_BY_NAME[p.name]) return GEO_BY_NAME[p.name];
-  if (p.ticker && GEO_BY_TICKER[p.ticker]) return GEO_BY_TICKER[p.ticker];
   if (p.exp_cur) return EXPGEO[p.exp_cur] || 'OT';
   if (regKey === 'japan') return 'JP';        // PE 與 Activist 沒有代號,靠所屬區
   if (regKey === 'china') return 'CN';
@@ -124,8 +126,6 @@ function grpTheme(regKey, gname) {
   if (regKey === 'china') return '中國網路與消費';
   return g;
 }
-const THEME_BY_TICKER = {      // 日本重工四檔(遷移用,見 migrateClass)
-  '7011:TYO':'國防', '7012:TYO':'國防', '7013:TYO':'國防', '5631:TYO':'國防'};   // mig:v124 移除
 // 半導體區的重複列示本身就是「這檔也算半導體」的標記,拿它當主題歸屬,
 // 同時掛在台股與半導體的部位才不會被算成台股個股。
 // (「TW Active Funds」是整個群組的合計、沒有代號,所以台股基金仍歸台股主動基金。)
@@ -138,7 +138,6 @@ function semiTags() {
 }
 function themeOf(p, regKey, gname, tags) {
   if (p.theme) return p.theme;
-  if (p.ticker && THEME_BY_TICKER[p.ticker]) return THEME_BY_TICKER[p.ticker];
   if (p.ticker && tags[p.ticker]) return tags[p.ticker];
   return grpTheme(regKey, gname);
 }
@@ -812,6 +811,7 @@ function render() {
     <button id="expJson">${(SYNC && SYNC.token) ? "匯出備份 (JSON)" : "匯出目前組合 (JSON)"}</button>
     ${EDIT ? '<button id="deriveCost" title="成本 = 市值 ÷ (1 + Breakeven);只填尚未設定成本的部位">↧ 由 Breakeven 反推成本</button>' : ''}
     <button id="plToggle">${HIDEPL ? '＋ 顯示未實現損益' : '－ 隱藏未實現損益'}</button>
+    <button id="unlToggle">${HIDEUNL ? '＋ 顯示未上市部位' : '－ 隱藏未上市部位'}</button>
     <button onclick="document.getElementById('stmtFile').click()" class="primary">↥ 匯入對帳單</button>
     <input type="file" id="stmtFile" accept=".xlsx,.csv" hidden>
     <button onclick="document.getElementById('impFile').click()">匯入組合 (JSON)</button>
@@ -870,7 +870,7 @@ function render() {
           : '<span class="mut">—</span>';
         const ck = costK(p), uk = unrealK(p);
         const key = `${reg.key}||${g.name}||${pi}`;
-        let h = `<tr class="${p.dup ? 'dup' : ''}${extraCls ? ' ' + extraCls : ''}"><td>${esc(p.name)}${p.dup ? ' <span class="badge">dup</span>' : ''}` +
+        let h = `<tr class="${p.dup ? 'dup' : ''}${extraCls ? ' ' + extraCls : ''}${isUnlisted(p) ? ' unl' : ''}"><td>${esc(p.name)}${p.dup ? ' <span class="badge">dup</span>' : ''}` +
           `<span class="tk">${esc(p.ticker || p.note || '')}</span></td>` +
           `<td class="num">${mvCell}</td>` +
           `<td class="num xs-hide">${gmvAll ? (mv/gmvAll*100).toFixed(1) + '%' : '—'}</td>` +
@@ -928,6 +928,10 @@ function render() {
           `<td class="num">${today}</td><td>${badge(q0)}</td></tr>`;
         if (open) it.parts.forEach(x => { out += rowHtml(x.p, x.pi, 'subrow'); });
       });
+      // 隱藏未上市部位時,這一組被藏掉幾列要看得到,免得整組看起來像空的、
+      // 或小計對不上眼前的列(小計仍含它們,這是使用者選的口徑)。
+      const gunl = g.positions.filter(isUnlisted).length;
+      if (gunl) out += `<tr class="unlnote"><td colspan="${EDIT ? 11 : 10}" class="mut">已隱藏 ${gunl} 檔未上市部位(小計與總資產仍含)</td></tr>`;
       let warn = '';
       if (g.report_total && Math.abs(gmvAll - g.report_total.mv) / g.report_total.mv > 0.01)
         warn = ` <span class="warnnote">⚠ 報表小計 ${fmt0(g.report_total.mv)}</span>`;
@@ -1174,6 +1178,7 @@ function render() {
 
   renderNav();
   applyHidePL();          // 每次重繪都要重新套用(工具列按鈕文字也在這裡同步)
+  applyHideUNL();
 
   // YTD P&L top contributors
   const top = [...nd].filter(p => ytdOf(p) != null).sort((a,b) => Math.abs(ytdOf(b)) - Math.abs(ytdOf(a))).slice(0, 12);
@@ -1655,6 +1660,12 @@ function wireEditing() {
     try { localStorage.setItem(PL_KEY, HIDEPL ? '1' : '0'); } catch (e) {}
     applyHidePL();
   });
+  const ut = $('unlToggle');
+  if (ut) ut.addEventListener('click', () => {
+    HIDEUNL = !HIDEUNL;
+    try { localStorage.setItem(UNL_KEY, HIDEUNL ? '1' : '0'); } catch (e) {}
+    applyHideUNL();
+  });
   const cl = $('clearLocal');
   if (cl) cl.addEventListener('click', () => { if (confirm('清除本機所有手動修改?將回到自動更新的版本。')) clearLocal(); });
   const t = $('editToggle');
@@ -1918,7 +1929,11 @@ async function stashGet() {
   try { raw = localStorage.getItem(LS_STASH_KEY); } catch (e) { return null; }
   if (!raw) return null;
   try {
-    return JSON.parse(raw.startsWith(ENC_PREFIX) ? await syncDec(raw.slice(ENC_PREFIX.length)) : raw);
+    if (raw.startsWith(ENC_PREFIX)) return JSON.parse(await syncDec(raw.slice(ENC_PREFIX.length)));
+    // 有金鑰時不接受明文備份(與 readLocal 同一條規則):同 origin 的其他頁面寫得進這個
+    // localStorage,一份明文備份加一句「整份套用我的那份」就能把持倉換掉。
+    if (SYNC && SYNC.key) { try { localStorage.removeItem(LS_STASH_KEY); } catch (e) {} return null; }
+    return JSON.parse(raw);
   } catch (e) { return null; }
 }
 function stashDrop() { try { localStorage.removeItem(LS_STASH_KEY); } catch (e) {} }
@@ -1951,6 +1966,9 @@ function stashDiff(mine, theirs) {
     if (!y) { rows.push([k, '有', '(目前沒有)']); return; }
     FIELDS.forEach(f => {
       const xv = JSON.stringify(x[f] ?? null), yv = JSON.stringify(y[f] ?? null);
+      // geo / theme 是 2026-09 才搬進部位的分類欄位:一邊有、一邊沒有 = 一份還沒搬過,
+      // 不是使用者改的;兩邊都有但不同才算(使用者真的改過分類)。
+      if ((f === 'geo' || f === 'theme') && (!x[f] || !y[f])) return;
       if (xv !== yv) rows.push([`${x.name || k} · ${f}`, xv, yv]);
     });
   });
@@ -2120,12 +2138,8 @@ function normForSig(regions) {
   rs.forEach(r => (r.groups || []).forEach(g => (g.positions || []).forEach(p => {
     if (!p || typeof p !== 'object') return;
     if (p.derived) DERIVED_CALC.forEach(f => delete p[f]);
-    // 只補空的,使用者真的改過 geo / theme 仍然比得出來
-    if (!p.geo) {
-      const g2 = GEO_BY_NAME[p.name] || (p.ticker && GEO_BY_TICKER[p.ticker]);
-      if (g2) p.geo = g2;
-    }
-    if (!p.theme && p.ticker && THEME_BY_TICKER[p.ticker]) p.theme = THEME_BY_TICKER[p.ticker];
+    // v139 起沒有對照表可補 geo / theme;「一邊有、一邊沒有」的情形交給 stashDiff 判成不算差異
+    // (簽章會不同,但差異表是空的就會自動清掉備份,見 renderAlerts)。
   })));
   // 部位也一樣:`geo: null` 與沒有 geo 是同一件事,鍵的順序也不該影響
   rs.forEach(r => (r.groups || []).forEach(g => {
@@ -2723,10 +2737,7 @@ setTimeout(async () => {
     const [a, b] = [await contentSig(STASH.body), await contentSig(stashPeer())];
     if (a && b && a === b) { STASH = null; stashDrop(); }
   }
-  // 一次性:把程式碼裡的分類表搬進部位欄位(見 migrateClass),之後程式碼就不必再帶代號。
-  // 拉取失敗時不存本機副本:那會做出一份帶著新時間戳的副本,下次載入贏過遠端再被推上去。
-  // 本機副本解不開時也不存:那會把使用者解不開但仍存在的資料覆寫掉。
-  if (migrateClass() && remote !== false && !LOCAL_UNREADABLE) { await saveLocal(); schedulePush(); }
+  // (v139:一次性的 migrateClass 已移除,分類全部在覆寫檔的 geo / theme 欄位裡。)
   render();
   renderAlerts();
 }, 0);

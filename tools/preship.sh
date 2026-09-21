@@ -26,11 +26,11 @@ step "2 版本號有遞增"
 grep -q "BUILD_TAG = \"$V\"" src/build_dashboard_v3.py
 res $?
 
-step "3 情境測試(11 支)"
+step "3 情境測試(12 支)"
 OUT=""
 for d in tests/tt6 tests/tt7; do cp src/*.py "$d/" 2>/dev/null; done
 for f in tests/tt6/replay.py tests/tt6/asia.py tests/tt6/tw.py tests/tt6/graceopen.py \
-         tests/tt6/ledger.py tests/tt7/slot.py tests/tt7/skip.py tests/tt7/navchg.py; do
+         tests/tt6/ledger.py tests/tt6/twrt.py tests/tt7/slot.py tests/tt7/skip.py tests/tt7/navchg.py; do
   (cd "$(dirname $f)" && python3 "$(basename $f)" >/dev/null 2>&1) || OUT="$OUT $(basename $f)"
 done
 [ -z "$OUT" ]; res $?
@@ -70,9 +70,9 @@ sys.exit(0 if (rep['mv'] == o['mv'] and rep['n'] == o['n']) else 1)
 PY
 res $?
 
-step "7 前端測試(3 支,含端對端)"
+step "7 前端測試(4 支,含端對端)"
 OUT=""
-for f in tests/tt8/sync.js tests/tt8/noise.js tests/tt8/e2e.js; do
+for f in tests/tt8/sync.js tests/tt8/noise.js tests/tt8/e2e.js tests/tt8/unlisted.js; do
   node "$f" >/dev/null 2>&1 || OUT="$OUT $(basename $f)"
 done
 [ -z "$OUT" ]; res $?
@@ -82,9 +82,10 @@ step "8 分岔備份不誤報(用線上資料種一份舊副本)"
 (cd replica && node ../tools/stash_replica.js >/dev/null 2>&1)
 res $?
 
-step "9 公開面洩漏檢查"
-(cd replica && python3 leak_check.py dashboard.html >/dev/null 2>&1)
+step "9 公開面洩漏檢查(建置腳本 + tests/ tools/ 文件)"
+(cd replica && python3 leak_check.py dashboard.html >/dev/null 2>&1) && python3 tools/leakscan.py >/tmp/_leak.txt 2>&1
 res $?
+grep -v '^leakscan: ok' /tmp/_leak.txt | sed 's/^/      /' | head -12
 
 step "10 打包 + 500 KB 上限"
 python3 tools/repack.py "$BASE" "$OUTYML" >/tmp/_pack.txt 2>&1
