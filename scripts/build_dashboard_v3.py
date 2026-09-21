@@ -105,7 +105,7 @@ for _t in P["trims"]:
 # 「我貼上去的那一份到底生效了沒有」,以前只能繞去 GitHub 比檔案大小。
 # 版本號由交付 yml 時手動遞增;後面六碼是四個腳本內容的雜湊,
 # 就算版本號忘了改也會跟著變,所以它不會說謊。
-BUILD_TAG = "v141"
+BUILD_TAG = "v142"
 import hashlib as _hl
 _sig = _hl.md5(b"".join(
     open(_f, "rb").read()
@@ -233,7 +233,7 @@ html = ("""<!DOCTYPE html>
 <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAADFUlEQVR42u3du2obURCAYdkItynTuUrlgN//OQxJlUqP4SpdCEGK5T3Xmfn+LhCE0Pk0e9F69+HL15eTdK1HH4HgEByCQ3AIDsEhOASH4BAcEhyCQ3AIDsEhOASH4BAcgkOCQ3AIDsEhOASH4BAcgkNwSHAIDsEhOASH4BAcCtbZRxC9t6fnv//5+n7p9coP7kOahkV3InBkY9GRiH2OtDI+9T/hEBzGRqfhAYfgKDk2GocHHIJDcAgOwaEe+5WHz5PCkVyGyUFG/7EBh5kBR1UZjb/KutjH1gSOMnW8EgyOJGOjown7HGTAQQYcZMBBxjwZcJABBxlwCA5j4wIHGStlwEEGHGTAQQYcZMBBxlIZcAgOYwMOMuAgAw4y4CBjTxlwkAEHGXAIDmMDDjLgIGNPGXCQAQcZcJABBxlwCA5jY9vOyRZm/ueeVcYp9GO8bq3KzE8/sYzAOD5clQnLkFtGVBz3r8q49UgvIx6OY3df7L4wFWQEO1o5fF/OvjcBLiIjEo7GBX57el54n+igxdis9F3Xlq9ynbERA8egb/yBZSslIwCO0duC+9evmoytcczcRfhwIQvK2BfHkp3HWytaU8amONYeVvyztGVl7Iij/TRXu60/r1ZZxmm38xxdToC+vl8aF8lJkb0mx4jnYk5e4GRjYxccQ5+YOodIPhlb4JjzLN2hRFLKWI9j8q+sI4hklbEYx6rf3zsSSSxjGY75j2UfQSS3jDU4dpCx55vZrcfKMk49TorAkfxr+tnXL+Jp3mZlk8s/299knUkzCUcIGfe821LboOE44u7xLf9buuQ4HAvYISUjZ+etZGCRf3KQYXLYlJgcZMBBhgYeyha/HNfk6LbYZBQ9WiEDjoOrTkbdyfH/tSej+mbllgAyYjXpPqRYmBzXNZABx3UfZMQt8B2MFXhyCA7BITgkOASH4BAcgkNwCA7BIThUp6aLfb69fPcJ7t+vnz9MDtmsCA7BITgUMNeQyuQQHIJDcAgOwSE4BIfgEBwSHIJDcAgOwSE4BIfgEByCQ4JDcAgOwSE4tEe/AcmPXWpuUALfAAAAAElFTkSuQmCC">
 <style>""" + CSS + """</style></head><body><div class="wrap">
 <h1>投資組合 Dashboard</h1>
-<div class="meta">報價時間:""" + Q["fetched_at_taipei"] + """ 台北時間 · 自動更新:亞股 08:00–13:30 每半小時 + 14:00,美股 21:30–00:00 每半小時 + 04:00 收盤 · 單位 USD 千元 · 紅漲綠跌 · 上市部位依隱含股數連動現價,基金/PE 為報表 NAV<span title="建置版本。貼上新的 build.yml 重跑之後這裡會跟著變;沒變就是還沒生效,或瀏覽器還在給快取(強制重新整理一次)。"> · 建置 """ + BUILD_TAG + " · " + _sig + """</span></div>
+<div class="meta">報價時間:""" + Q["fetched_at_taipei"] + """ 台北時間 · 自動更新:亞股 08:07–14:07 每半小時,美股 21:37–00:07 每半小時 + 04:07 收盤(避開整點,GitHub 整點排程常被延後或丟掉) · 單位 USD 千元 · 紅漲綠跌 · 上市部位依隱含股數連動現價,基金/PE 為報表 NAV<span title="建置版本。貼上新的 build.yml 重跑之後這裡會跟著變;沒變就是還沒生效,或瀏覽器還在給快取(強制重新整理一次)。"> · 建置 """ + BUILD_TAG + " · " + _sig + """</span></div>
 <nav id="topnav"></nav>
 <!-- 常駐警示區。刻意放在 #regions 之外:render() 會整份重寫 #regions.innerHTML,
      以前唯一一處「告訴使用者資料被丟了」的訊息就住在那裡面,按任何按鈕就被洗掉。 -->
