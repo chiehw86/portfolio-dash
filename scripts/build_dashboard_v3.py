@@ -105,12 +105,13 @@ for _t in P["trims"]:
 # 「我貼上去的那一份到底生效了沒有」,以前只能繞去 GitHub 比檔案大小。
 # 版本號由交付 yml 時手動遞增;後面六碼是四個腳本內容的雜湊,
 # 就算版本號忘了改也會跟著變,所以它不會說謊。
-BUILD_TAG = "v142"
+BUILD_TAG = "v143"
 import hashlib as _hl
 _sig = _hl.md5(b"".join(
     open(_f, "rb").read()
     for _f in ("v3.js", "v3.css", "build_dashboard_v3.py", "fetch_action.py")
     if os.path.exists(_f))).hexdigest()[:6]
+STAMP = Q["fetched_at_taipei"] + " " + BUILD_TAG + " " + _sig      # 這一版的唯一戳記(v143)
 
 fxu = Q["fx_usd"]
 units_store = json.load(open("units.json")) if os.path.exists("units.json") else {}
@@ -226,7 +227,7 @@ JS = open("v3.js").read()
 html = ("""<!DOCTYPE html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'">
 <title>投資組合 Dashboard</title>
 <meta name="theme-color" content="#0f172a">
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAABMUlEQVR42u3ZsQ6CMBDG8UIIq6MbkxMmvv9zmOjk5GM4OTQhBiht7670Tr5OxDj8f7TUEpvTeXSWR+uMDwAAAAAAAAAAAIAjAzrlffd+8Be3z9veDEz1s2sbgGXxqgEPMQCJ6yf0HLem6zVuo7P6ULeNZyBarw7we/tT6nUBQj9VNgC5S18XgFyvAsCprw9g1lcG8OtrAkTqqwGk6usABOtlAD6I9jPErHfONcx/aJbd202Ew0Kpl/rQLfefr8bRZqnIDKSnTBLZpc8ChF44CKoKgOiijzIE6/MAWW96hO+XBZBrxLcdCoB/L+/9UKI+CZC70+88uqI3fofRmq7fAixbFdanHiV0psdPo75bc73AaVT1DAAAwBEA69voZbwqbH09H384A9hGAQAAAAAAMD2+Obd63p9NicoAAAAASUVORK5CYII=">
@@ -280,7 +281,8 @@ window.__FX__ = """ + j({k: v for k, v in fxu.items() if isinstance(v, (int, flo
 window.__HIST__ = """ + j(HIST) + """;
 window.__SYNC__ = """ + j(SYNC) + """;
 window.__CLOSEDQ__ = """ + j(CLOSEDQ) + """;
-window.__CLOSEDDROP__ = """ + j(CLOSED_DROP) + """;</script>
+window.__CLOSEDDROP__ = """ + j(CLOSED_DROP) + """;
+window.__STAMP__ = """ + j(STAMP) + """;</script>
 <script>""" + JS + """</script>
 </body></html>""")
 
@@ -292,4 +294,7 @@ _B = 65536
 _need = (-(len(html.encode()) + 8)) % _B          # "\n" + "<!--" + "-->" = 8 bytes
 html += "\n<!--" + "0" * _need + "-->"
 open("dashboard.html", "w").write(html)
+# 這一版的戳記,另存成小檔跟頁面一起發佈:前端拿它判斷「伺服器上有沒有更新的一版」(v143)。
+# 內容只有報價時刻 + 版本標記 + 指紋,沒有任何持倉資訊;長度固定,不會洩漏什麼。
+open("build.txt", "w").write(STAMP + "\n")
 print("built ok")
