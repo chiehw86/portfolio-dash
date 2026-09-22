@@ -12,7 +12,21 @@ import sync_crypto
 KEY = "k" * 43 + "="
 FAILS = []
 
+# 情境的日期寫死在 2026-09-08 前後;抓價端有「整個交易所落後超過一週 = 資料源壞了」的規則,
+# 過兩週這些情境就會整批被判成「報價停在 09/08」而失敗(2026-09-21 踩到)。
+# 改成以整週為單位往今天平移:星期幾不變、彼此的間隔不變,最新一根永遠在一週內。
+_ANCHOR = datetime.date(2026, 9, 8)
+_SHIFT = datetime.timedelta(days=7 * max(0, (datetime.date.today() - _ANCHOR).days // 7 - 0))
+def _sh(o):
+    if isinstance(o, str) and len(o) == 10 and o[4] == '-' and o[7] == '-':
+        try: return (datetime.date.fromisoformat(o) + _SHIFT).isoformat()
+        except ValueError: return o
+    if isinstance(o, list): return [_sh(x) for x in o]
+    if isinstance(o, dict): return {_sh(k): _sh(v) for k, v in o.items()}
+    return o
+
 def run(name, spec, book, want_prev=None, want_chg=None, want_note=None, tk="AAA:NYSE"):
+    spec, book = _sh(spec), _sh(book)
     json.dump(spec, open('spec.json', 'w'))
     json.dump({"portfolio": {"regions": [{"name": "r", "groups": [{"name": "g", "positions":
               [{"name": "x", "ticker": tk, "kind": "live", "cur": "USD"}]}]}]},

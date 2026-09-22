@@ -19,7 +19,7 @@ def _local_stub(key):
     l = datetime.datetime.now(_TPE if key == 'TPE' else _NY)
     return l.date(), l.hour + l.minute / 60.0
 
-def run(name, px_book, quotes, bars, want_write, check=None, nav_sk=KEY, local=None, tw_close=None):
+def run(name, px_book, quotes, bars, want_write, check=None, nav_sk=KEY, local=None, tw_close=None, expected=None):
     wrote = {}
     def _ghwrite(path, blob, message=None):
         wrote['path'] = path; wrote['blob'] = blob
@@ -30,7 +30,10 @@ def run(name, px_book, quotes, bars, want_write, check=None, nav_sk=KEY, local=N
           '_ex_of': lambda t: t.partition(':')[2] if t.partition(':')[2] in ('TPE',) else 'US',
           '_local': local or _local_stub,
           'QUOTE_DELAY_MIN': {'TPE': 20, 'TYO': 20, 'KRX': 20, 'HKG': 15, 'SHA': 30, 'SHE': 30},
+          'datetime': datetime,
           'TW_CLOSE': tw_close or {},
+          # v140:「應該有的最後一場」;沒指定就當成該交易所當地今天(不擋今天以前的任何日期)
+          'expected_session': (lambda t, _e=expected: _e) if expected else (lambda t: (local or _local_stub)(t.partition(':')[2] if t.partition(':')[2] in ('TPE',) else 'US')[0]),
           '_enc': _enc, '_padj': _padj, 'print': lambda *a, **k: None}
     exec(BLK, ns)
     got = 'blob' in wrote
@@ -49,8 +52,8 @@ Q = lambda price, asof, live=False, note='美股收盤': {
 
 print('\n[1] 第一次跑:帳本不存在(px_book 空的)→ 要長出帳本')
 run('bootstrap', {}, {'XYZ:NASDAQ': Q(120.0, '2026-09-08')},
-    {'XYZ': {'2026-09-04': 118.0, '2026-09-05': 119.0}}, True,
-    check=lambda b, _: b['XYZ:NASDAQ'] == {'2026-09-04': 118.0, '2026-09-05': 119.0,
+    {'XYZ': {'2026-09-03': 118.0, '2026-09-04': 119.0}}, True,      # v142:樣本一律用平日(週末不是場次)
+    check=lambda b, _: b['XYZ:NASDAQ'] == {'2026-09-03': 118.0, '2026-09-04': 119.0,
                                           '2026-09-08': 120.0})
 
 print('\n[2] 同一場次第二次看到不同的價(事後還原)→ 不覆寫第一次看到的')
@@ -72,10 +75,11 @@ print('\n[6] 台灣基金不入帳(它走 nav-cache)')
 run('twfund-skip', {}, {'0050:TWFUND': Q(50.0, '2026-09-08')}, {}, False)
 
 print('\n[7] 超過 PX_KEEP 場 → 只留最近 15 場')
-old = {f'2026-08-{d:02d}': 100.0 + d for d in range(1, 21)}
+_wd = [d for d in (datetime.date(2026, 8, 1) + datetime.timedelta(days=i) for i in range(31)) if d.weekday() < 5][:20]
+old = {d.isoformat(): 100.0 + d.day for d in _wd}                  # v142:20 個平日(週末不是場次)
 run('trim', {'XYZ:NASDAQ': old}, {'XYZ:NASDAQ': Q(120.0, '2026-09-08')}, {}, True,
     check=lambda b, _: len(b['XYZ:NASDAQ']) == 15
-                       and min(b['XYZ:NASDAQ']) == '2026-08-07'
+                       and min(b['XYZ:NASDAQ']) == _wd[6].isoformat()
                        and '2026-09-08' in b['XYZ:NASDAQ'])
 
 print('\n[8] 沒有 SYNC_KEY → 絕不落明文')
@@ -86,7 +90,9 @@ import datetime as _dt
 _TPE = _dt.timezone(_dt.timedelta(hours=8))
 _tw_now = _dt.datetime.now(_TPE)
 _tw_today = _tw_now.date().isoformat()
-_tw_yday = (_tw_now.date() - _dt.timedelta(days=1)).isoformat()
+_yd = _tw_now.date() - _dt.timedelta(days=1)
+while _yd.weekday() >= 5: _yd -= _dt.timedelta(days=1)          # v142:週末不是場次,退到上一個平日
+_tw_yday = _yd.isoformat()
 _tw_closed = (_tw_now.hour + _tw_now.minute / 60.0) >= 13.5 + 25 / 60.0   # v138:收盤 + 資料源延遲 20 分 + 5
 run('intraday-bar', {}, {'9901:TPE': Q(100.0, _tw_yday)},
     {'9901': {_tw_yday: 99.0, _tw_today: 100.5}}, True,
@@ -111,6 +117,27 @@ run('官方與帳本一致 → 不寫', {'9901:TPE': {'2026-09-15': 1035.0}}, {'
     local=lambda k: (_D, 10.0), tw_close={'9901': (1035.0, _dt.date(2026, 9, 15))})
 run('官方只影響台股', {'XYZ:NASDAQ': {'2026-09-15': 120.0}}, {'XYZ:NASDAQ': Q(121.0, '2026-09-15')}, {}, False,
     tw_close={'XYZ': (999.0, _dt.date(2026, 9, 15))})
+
+print('\n[14] v142:晚於「應該有的最後一場」的日期不是收盤(2026-09-21 週一 08:32:台股試撮價被放進標成週日的日線)')
+_MON = _dt.date(2026, 9, 21); _FRI = _dt.date(2026, 9, 18)
+run('週日的日線種子不入帳、當天的也不入', {}, {'9901:TPE': Q(1045.0, '2026-09-20', note='收盤')},
+    {'9901': {'2026-09-18': 1125.0, '2026-09-20': 1045.0, '2026-09-21': 1045.0}}, True,
+    local=lambda k: (_MON, 8.53), expected=_FRI,
+    check=lambda b, _: b['9901:TPE'] == {'2026-09-18': 1125.0})
+run('已經寫進去的週日那筆要被清掉', {'9901:TPE': {'2026-09-18': 1125.0, '2026-09-20': 1045.0}},
+    {'9901:TPE': Q(1125.0, '2026-09-18', note='收盤')}, {}, True,
+    local=lambda k: (_MON, 8.53), expected=_FRI,
+    check=lambda b, _: b['9901:TPE'] == {'2026-09-18': 1125.0})
+run('週五收盤後(官方已是週五)照常寫週五', {}, {'9901:TPE': Q(1125.0, '2026-09-18', note='收盤')}, {}, True,
+    local=lambda k: (_FRI, 14.1), expected=_FRI, check=lambda b, _: b['9901:TPE'] == {'2026-09-18': 1125.0})
+run('★ 台股 14:10 收盤後、官方還停在週五 → 今天的收盤照常寫(v141 會擋掉)', {'9901:TPE': {'2026-09-18': 1125.0}},
+    {'9901:TPE': Q(1130.0, '2026-09-21', note='收盤')}, {}, True,
+    local=lambda k: (_MON, 14.17), expected=_FRI,
+    check=lambda b, _: b['9901:TPE'] == {'2026-09-18': 1125.0, '2026-09-21': 1130.0})
+run('美股:昨天的正常寫、明天的不寫', {}, {'XYZ:NASDAQ': Q(120.0, '2026-09-18')},
+    {'XYZ': {'2026-09-17': 118.0, '2026-09-18': 120.0, '2026-09-19': 121.0}}, True,
+    local=lambda k: (_dt.date(2026, 9, 19), 10.0), expected=_FRI,
+    check=lambda b, _: b['XYZ:NASDAQ'] == {'2026-09-17': 118.0, '2026-09-18': 120.0})
 
 print('\n[11] v1 的帳本整份作廢(混進過盤中價,而且改不掉)')
 import re as _re, gzip as _gz

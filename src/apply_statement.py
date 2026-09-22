@@ -6,7 +6,7 @@
 地方,所以所有裝置都會看到,而且下一輪建置照樣生效。
 
 加密方式與 overlay.enc 相同(AES-GCM,SYNC_KEY):
-    SYNC_KEY=... python sync_crypto.py enc-file < FMGAR140.xlsx > statement.enc
+    SYNC_KEY=... python sync_crypto.py enc-file < statement.xlsx > statement.enc
 repo 是公開的:明文的 data/statement.xlsx 一律拒收並讓建置失敗(紅字才會有人看到),
 絕不能讓一份放錯位置的對帳單被靜靜地讀進來、還留在 git 歷史裡。
 

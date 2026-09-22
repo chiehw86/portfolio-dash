@@ -63,13 +63,14 @@ for top in ("tests", "tools"):
             if f.endswith((".py", ".js", ".json", ".sh", ".md", ".txt", ".csv")):
                 targets.append(os.path.join(dp, f))
 
+STMT_CODE_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{4,6}\d{3,4}(?![A-Za-z0-9])")   # 對帳單 / 帳戶型代碼樣式
 bad = 0
 for f in targets:
     if not os.path.exists(f):
         continue
     n = 0
     for line in open(f, encoding="utf-8", errors="ignore"):
-        if any(_hit(d, line) for d in deny):
+        if any(_hit(d, line) for d in deny) or (STMT_CODE_RE.search(line) and "sha256" not in line):
             n += 1
     if n:
         print(f"leakscan: {f}:{n}")

@@ -70,9 +70,9 @@ sys.exit(0 if (rep['mv'] == o['mv'] and rep['n'] == o['n']) else 1)
 PY
 res $?
 
-step "7 前端測試(4 支,含端對端)"
+step "7 前端測試(5 支,含端對端)"
 OUT=""
-for f in tests/tt8/sync.js tests/tt8/noise.js tests/tt8/e2e.js tests/tt8/unlisted.js; do
+for f in tests/tt8/sync.js tests/tt8/noise.js tests/tt8/e2e.js tests/tt8/unlisted.js tests/tt8/stamp.js; do
   node "$f" >/dev/null 2>&1 || OUT="$OUT $(basename $f)"
 done
 [ -z "$OUT" ]; res $?

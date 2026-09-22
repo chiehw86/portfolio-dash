@@ -10,7 +10,7 @@ def slot_of(stamp):
     return (18 <= t.hour <= 20 and t.weekday() < 5)
 
 # 四輪排程(UTC cron → 台北)
-CRONS = ['18:00', '19:00', '20:00', '20:40']
+CRONS = ['18:07', '19:07', '20:07', '20:47']   # v142:避開整點,分鐘 +7
 print('[1] 四輪排程都必須落在結算窗口內')
 for c in CRONS:
     ok = slot_of(f'2026-09-09 {c}')
@@ -29,7 +29,7 @@ for c in CRONS:
 print('  → 四輪全部落空才會漏掉一天(以前是 18:00 那一輪落空就漏)')
 
 print('\n[3] 美股開盤前:窗口最晚 20:59,美股最早 21:30 開盤 → 日終切片仍乾淨')
-ok = not slot_of('2026-09-09 21:30')
+ok = not slot_of('2026-09-09 21:37')
 print(('  ok   ' if ok else '  FAIL ') + f'台北 21:30 在窗口外={ok}')
 if not ok: fails.append('21:30')
 
