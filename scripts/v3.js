@@ -1274,10 +1274,35 @@ function render() {
   renderHistory();
 }
 
-// 外部發佈版:每 15 分鐘自動重新載入,確保看到最新一版
-// 重載帶時間戳:GitHub Pages/手機瀏覽器會把同網址的舊頁快取很久,
-// 換版後「一直看到舊的」全是這個造成的 —— 帶參數保證每次都拿最新發布。
-setTimeout(() => location.replace(location.pathname + '?t=' + Date.now()), 15 * 60 * 1000);
+// ══ 外部發佈版:自動換到最新一版(v143)══
+// 以前只靠「15 分鐘後帶 ?t= 時間戳重載」。網址一旦帶著舊的 ?t=,之後按重新整理拿到的可能還是
+// 快取(瀏覽器與 GitHub Pages 的 CDN 都會留 10 分鐘),使用者以為「Mac 沒更新」。
+// 現在:載入後、每 15 分鐘、回到前景 / 視窗取得焦點時,向伺服器要 build.txt(小檔,不走快取,
+// 網址帶時間戳連 CDN 也繞過),裡面是最新一版的戳記;跟頁面自己嵌的不同,就換到 ?v=<新戳記>
+// 的網址 —— 新網址一定回源。已經為同一個戳記換過頁就不再換(壞掉時最多多載一次,不會迴圈)。
+// 有還沒推上雲端的修改時不換頁,等推完下一次再檢查。build.txt 不存在(例如經 Worker 入口)就什麼都不做。
+const STAMP = String(window.__STAMP__ || '');
+let _stampBusy = false;
+async function checkNewer() {
+  if (_stampBusy || !STAMP) return;
+  _stampBusy = true;
+  try {
+    const r = await fetch('build.txt?_=' + Date.now(), {cache: 'no-store'});
+    if (r.ok) {
+      const s = (await r.text()).trim();
+      const u = new URL(location.href);
+      if (s && s !== STAMP && u.searchParams.get('v') !== s && !(typeof PENDING_PUSH !== 'undefined' && PENDING_PUSH)) {
+        u.searchParams.delete('t'); u.searchParams.set('v', s);
+        location.replace(u.toString());
+      }
+    }
+  } catch (e) {}
+  _stampBusy = false;
+}
+setTimeout(checkNewer, 1500);
+setInterval(checkNewer, 15 * 60 * 1000);
+addEventListener('visibilitychange', () => { if (!document.hidden) checkNewer(); });
+addEventListener('focus', () => checkNewer());
 
 // ══ 外幣曝險與避險比率 ══
 // 幣別認定:日本區一律 JPY(穿透口徑,含 PE 與美元計價級別);其餘依部位計價幣別
