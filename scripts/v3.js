@@ -222,6 +222,40 @@ const costK = p => {
   return null;
 };
 const unrealK = p => { const c = costK(p); return c == null ? null : effMv(p) - c; };
+// 分割 / 合併換算(純函式,測試直接呼叫):ratio = 1 股變成幾股。回傳有沒有改到東西。
+// ask 預設用 confirm();股數與每股成本一題、該檔的減碼紀錄一題,各自可以拒絕。
+// 減碼紀錄的 u0 / u1 是股數、exit 是每股出場價;real_k 是總額,不動。
+function splitAdjust(p, ratioText, ask = m => confirm(m)) {
+  const n = +String(ratioText ?? '').trim();
+  if (!(n > 0) || n === 1) return false;
+  const rnd = (v, d) => Math.round(v * 10 ** d) / 10 ** d;
+  let changed = false;
+  const u = unitsOf(p);
+  const hasCost = p.cost != null && p.cost !== '' && !isNaN(+p.cost);
+  if (u != null || hasCost) {
+    const msg = `${p.name || ''}:股數 ${u != null ? u.toLocaleString('en-US') : '—'} → ${u != null ? rnd(u * n, 4).toLocaleString('en-US') : '—'}` +
+      (hasCost ? `,每股成本 ${(+p.cost).toLocaleString('en-US', {maximumFractionDigits: 4})} → ${rnd(+p.cost / n, 4).toLocaleString('en-US', {maximumFractionDigits: 4})}` : '') +
+      `\n換算這個部位?(已經手動改過股數就按取消,只換算減碼紀錄)`;
+    if (ask(msg)) {
+      if (u != null) p.units_manual = rnd(u * n, 4);
+      if (hasCost) p.cost = rnd(+p.cost / n, 6);
+      changed = true;
+    }
+  }
+  const mine = (P.trims || []).filter(t => p.ticker ? t.ticker === p.ticker : (!t.ticker && t.name === p.name));
+  if (mine.length) {
+    const lines = mine.map(t => `  ${t.on || '?'}–${t.to || '?'}:股數 ${(+t.u0).toLocaleString('en-US')}→${(+t.u1).toLocaleString('en-US')} 變 ${rnd(+t.u0 * n, 4).toLocaleString('en-US')}→${rnd(+t.u1 * n, 4).toLocaleString('en-US')}` +
+      (t.exit != null ? `,出場價 ${(+t.exit).toLocaleString('en-US', {maximumFractionDigits: 2})} → ${rnd(+t.exit / n, 4).toLocaleString('en-US', {maximumFractionDigits: 2})}` : ''));
+    if (ask(`${p.name || ''}:${mine.length} 筆減碼紀錄\n${lines.join('\n')}\n換算這些減碼紀錄?`)) {
+      mine.forEach(t => {
+        t.u0 = rnd(+t.u0 * n, 4); t.u1 = rnd(+t.u1 * n, 4);
+        if (t.exit != null) t.exit = rnd(+t.exit / n, 4);
+      });
+      changed = true;
+    }
+  }
+  return changed;
+}
 // Breakeven(%):券商對帳單的「Breakeven Return」就是 市值 ÷ 累積成本 − 1(2026-09-07 以
 // 45 列逐一驗證,差異全是仟元四捨五入)。p.be 只是匯入當天的快照,價格一動就過時 ——
 // 曾有部位顯示 0.5%,旁邊的即時未實現卻是 +1.5%。有成本的部位一律即時算,
@@ -1639,6 +1673,7 @@ function editorRow(p, key, reg, g) {
       <label>所屬 basket<select class="eF" data-k="__move" data-key="${esc(key)}">${allGroupOpts(reg.key, g.name)}</select></label>
       <label>備註<input class="eF" data-k="note" data-key="${esc(key)}" value="${esc(p.note||'')}"></label>
       <div class="efbtns">
+        ${isMkt ? `<button class="del splitAdj" data-key="${esc(key)}" title="股票分割/合併:一次換算股數、每股成本與這一檔的減碼紀錄">÷× 分割調整</button>` : ''}
         <button class="del delPos" data-key="${esc(key)}" title="刪除此部位">✕ 刪除</button>
         <button class="del closeEd" data-key="${esc(key)}">收合</button>
       </div>
@@ -1719,6 +1754,18 @@ function wireEditing() {
     commit();
   }));
 
+  // ── 分割 / 合併 ─────────────────────────────────────────────────────
+  // 資料源會把歷史股價整串按比例改寫(2026-09-29 一檔日股 1→2:前一天的收盤隔天就顯示成一半),
+  // 但股數、每股成本、減碼紀錄的出場價都還是舊的 —— 市值直接少一半、減碼追蹤那一列的
+  // 「出場後漲跌」多掉一半。抓價端只能標「⚠ 疑似分割/合併,請確認股數」,換算得在這裡做,而且要一次做完:
+  // 只改股數不改減碼紀錄,那一列會一直錯到那筆超過半年被藏起來為止。
+  // 每一項都先問過再改;已經手動改過股數的,第一題按取消就只換算減碼紀錄。
+  document.querySelectorAll('.splitAdj').forEach(b => b.addEventListener('click', () => {
+    const {g, p} = findPos(b.dataset.key);
+    if (!g) return;
+    const r = splitAdjust(p, prompt(`「${p.name || ''}」分割比例:1 股變成幾股?\n分割 1→2 填 2;1→3 填 3;合併 10→1 填 0.1`, '2'));
+    if (r) commit();
+  }));
   document.querySelectorAll('.delPos').forEach(b => b.addEventListener('click', () => {
     const {g, i, p} = findPos(b.dataset.key);
     if (!g) return;
