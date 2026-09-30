@@ -126,19 +126,31 @@ function grpTheme(regKey, gname) {
   if (regKey === 'china') return '中國網路與消費';
   return g;
 }
-// 半導體區的重複列示本身就是「這檔也算半導體」的標記,拿它當主題歸屬,
-// 同時掛在台股與半導體的部位才不會被算成台股個股。
-// (「TW Active Funds」是整個群組的合計、沒有代號,所以台股基金仍歸台股主動基金。)
-function semiTags() {
+// 鏡像列本身就是「這檔也算那個主題」的標記(半導體區的重複列示 = 這檔也算半導體),
+// 拿它當主題歸屬,同時掛在台股與半導體的部位才不會被算成台股個股。
+// v149:連動列(derived)也算 —— 它連動哪個 basket,那個 basket 的成分就整批標成鏡像列所在的主題
+// (台股五檔主動基金經「TW Active Funds」連動列歸半導體;日本國防那籃經「Japan Defense」連動列歸國防)。
+// 以前只看半導體區、只看有代號的鏡像列,主題圖的半導體因此比區域標題少一成。
+const _posKey = p => p.ticker || p.name;
+function mirrorTags() {
   const m = {};
-  P.regions.forEach(r => { if (r.key !== 'semi') return;
-    r.groups.forEach(g => g.positions.forEach(p => {
-      if (p.dup && p.ticker) m[p.ticker] = grpTheme('semi', g.name); })); });
+  P.regions.forEach(r => r.groups.forEach(g => g.positions.forEach(p => {
+    if (!isDup(p)) return;
+    const theme = grpTheme(r.key, g.name);
+    if (p.derived) {
+      const src = P.regions.find(x => x.key === p.derived.region);
+      (src ? src.groups : []).forEach(gg => gg.positions.forEach(x => {
+        if (x === p || isDup(x)) return;
+        if ((p.derived.group && gg.name === p.derived.group) || (p.derived.subgrp && x.subgrp === p.derived.subgrp)) m[_posKey(x)] = theme;
+      }));
+    } else if (p.ticker) m[p.ticker] = theme;
+  })));
   return m;
 }
+const semiTags = mirrorTags;                      // 舊名,tests 與舊呼叫端仍可用
 function themeOf(p, regKey, gname, tags) {
   if (p.theme) return p.theme;
-  if (p.ticker && tags[p.ticker]) return tags[p.ticker];
+  if (tags && tags[_posKey(p)]) return tags[_posKey(p)];
   return grpTheme(regKey, gname);
 }
 const esc = s => String(s ?? '').replace(/[&<>"'`]/g, c =>
@@ -616,17 +628,19 @@ function buildReport() {
     `<td class="n ${a.hasQ ? c2(a.day) : ''}">${a.hasQ ? pc(a.dayPct) : '—'}</td></tr>`;
   let rows = '';
   P.regions.forEach(r => {
+    // v149:區域列與 basket 列一律「含重複列示」(與主頁的區域標題、basket 小計同口徑);
+    // 有鏡像列的區域另標「計入總資產 N」。最下面的合計仍是不含重複列示,所以合計 ≠ 各區相加是正常的。
     const rnd = r.groups.flatMap(g => g.positions).filter(p => !isDup(p));
     const rAll = r.groups.flatMap(g => g.positions);
-    const ra = aggOf(rnd);
-    const dupMv = rAll.filter(isDup).reduce((s, p) => s + effMv(p), 0);
+    const ra = aggOf(rAll), rn = aggOf(rnd);
+    const hasDup = rAll.some(isDup);
     const cross = /跨區/.test(r.name);
-    rows += row(`${esc(r.name)}${dupMv ? `<span class="s">另有重複列示 ${fmt0(dupMv)},不計入</span>` : ''}${cross ? '<span class="s">分析視角,僅海外部分計入總計</span>' : ''}`,
+    rows += row(`${esc(r.name)}${hasDup ? `<span class="s">計入總資產 ${fmt0(rn.mv)}(${tot ? (rn.mv / tot * 100).toFixed(1) : '—'}%),其餘為重複列示</span>` : ''}${cross ? '<span class="s">分析視角</span>' : ''}`,
                 ra, tot ? ra.mv / tot * 100 : null, 'reg');
     r.groups.forEach(g => {
-      const gnd = g.positions.filter(p => !isDup(p));
-      if (!gnd.length) return;
-      rows += row(`<span class="ind">${esc(g.name)}</span><span class="s">${gnd.length} 檔</span>`, aggOf(gnd), tot ? aggOf(gnd).mv / tot * 100 : null, 'grp');
+      if (!g.positions.length) return;
+      const ga = aggOf(g.positions), gdup = g.positions.filter(isDup).length;
+      rows += row(`<span class="ind">${esc(g.name)}</span><span class="s">${g.positions.length} 檔${gdup ? `,含重複列示 ${gdup}` : ''}</span>`, ga, tot ? ga.mv / tot * 100 : null, 'grp');
     });
   });
   rows += row('合計(不含重複列示)', all, 100, 'tot');
@@ -789,7 +803,7 @@ function render() {
     host.innerHTML = `<svg viewBox="0 0 ${AW} ${AH}" role="img" aria-label="配置">${segs}</svg>`;
     lgh.innerHTML = leg;
   };
-  const _tags = semiTags();
+  const _tags = mirrorTags();
   drawAlloc('alloc',  'alloclegend',
             capped(tally((p, r) => GEONAME[geoOf(p, r.key)] || '其他 / 全球')), tot);
   drawAlloc('alloc2', 'alloclegend2',
@@ -865,12 +879,18 @@ function render() {
       : (EDIT ? '編輯模式:修改只存在這台瀏覽器(未啟用同步),要正式生效請匯出 JSON 回傳給 Claude'
               : '靜態部位的市值可直接改;未啟用同步,改完請匯出傳回給 Claude')}</span></div>`;
   P.regions.forEach(reg => {
-    const rpos = reg.groups.flatMap(g => g.positions).filter(p => !isDup(p));
-    const rmv = rpos.reduce((s,p) => s + effMv(p), 0);
-    const rpl = rpos.reduce((s,p) => s + (ytdOf(p)||0), 0);
-    const rday = rpos.filter(p => p.q).reduce((s,p) => s + dayOf(p), 0);
-    const rdayTxt = rpos.some(p => p.q) ? `· 今日 <span class="${cls(rday)}">${sign0(rday)}</span>` : '';
-    out += `<div class="card" id="sec-${esc(reg.key)}"><h2>${esc(reg.name)} <span class="mut" style="font-weight:400">· ${fmt0(rmv)} USD K(${(rmv/tot*100).toFixed(1)}%)· YTD <span class="${cls(rpl)}">${sign0(rpl)}</span> ${rdayTxt}</span></h2>`;
+    // v148:區域標題改成「含重複列示」口徑,與 basket 小計一致。半導體那個跨區視角的區域幾乎
+    // 全是鏡像列,以前標題只算不重複的四檔(0.2%),與底下小計差了兩百倍;那個區域存在的目的
+    // 就是看「半導體整體佔多少」。計入總資產的部分另外標示,總資產本身不變。
+    const rall = reg.groups.flatMap(g => g.positions);
+    const rpos = rall.filter(p => !isDup(p));
+    const rmv = rall.reduce((s,p) => s + effMv(p), 0);
+    const rnet = rpos.reduce((s,p) => s + effMv(p), 0);
+    const rpl = rall.reduce((s,p) => s + (ytdOf(p)||0), 0);
+    const rday = rall.filter(p => p.q).reduce((s,p) => s + dayOf(p), 0);
+    const rdayTxt = rall.some(p => p.q) ? `· 今日 <span class="${cls(rday)}">${sign0(rday)}</span>` : '';
+    const rnetTxt = (rmv - rnet > 0.5) ? ` <span class="sub" title="其餘為重複列示(鏡像列),已在原區域計入">計入總資產 ${fmt0(rnet)}(${(rnet/tot*100).toFixed(1)}%)</span>` : '';
+    out += `<div class="card" id="sec-${esc(reg.key)}"><h2>${esc(reg.name)} <span class="mut" style="font-weight:400">· ${fmt0(rmv)} USD K(${(rmv/tot*100).toFixed(1)}%)· YTD <span class="${cls(rpl)}">${sign0(rpl)}</span> ${rdayTxt}${rnetTxt}</span></h2>`;
     reg.groups.forEach(g => {
       // basket 小計採「含 dup」口徑,與報表一致(鏡像列屬該 basket 的一員);
       // dup 的部分不計入總資產,故另外標示 gnet。
