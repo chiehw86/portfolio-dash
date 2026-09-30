@@ -129,6 +129,7 @@ def _clean_pos(p):
         elif k == "derived":
             if isinstance(v, dict):
                 q[k] = {"region": _str(v.get("region")) or "", "subgrp": _str(v.get("subgrp")) or ""}
+                if _str(v.get("group")): q[k]["group"] = _str(v.get("group"))   # v147:整個 basket
         elif k == "prev_override":
             if isinstance(v, dict) and _num(v.get("value")) is not None:
                 q[k] = {"date": _str(v.get("date")) or "", "value": _num(v.get("value"))}
