@@ -371,8 +371,12 @@ function resolveDerived() {
   P.regions.forEach(r => r.groups.forEach(g => g.positions.forEach(p => {
     if (!p.derived) return;
     const reg = P.regions.find(x => x.key === p.derived.region);
-    const src = (reg ? reg.groups : []).flatMap(gg => gg.positions)
-                  .filter(x => x.subgrp === p.derived.subgrp);
+    // 兩種指法:subgrp(某個 basket 裡的子群)或 group(整個 basket)。v147 加 group:
+    // 台股 Active Fund 那個 basket 的成分沒有 subgrp,鏡像列一直是凍結的靜態市值。
+    const src = (reg ? reg.groups : [])
+      .flatMap(gg => gg.positions.filter(x => x !== p && (
+        (p.derived.group && gg.name === p.derived.group) ||
+        (p.derived.subgrp && x.subgrp === p.derived.subgrp))));
     const mv = src.reduce((s, x) => s + effMv(x), 0);
     const day = src.filter(x => x.q).reduce((s, x) => s + dayOf(x), 0);
     p.mv = Math.round(mv * 10) / 10;
@@ -1671,6 +1675,10 @@ function editorRow(p, key, reg, g) {
         ${['TWD','JPY','KRW','HKD','CNY','USD','EUR','GBP'].map(c=>`<option${p.exp_cur===c?' selected':''}>${c}</option>`).join('')}
       </select></label>
       <label>所屬 basket<select class="eF" data-k="__move" data-key="${esc(key)}">${allGroupOpts(reg.key, g.name)}</select></label>
+      ${isMkt ? '' : `<label title="鏡像列:市值 / 損益 / 今日全部跟著來源 basket 的成分即時算,自己的數字不再用">連動合計來源<select class="eF" data-k="__derive" data-key="${esc(key)}">
+        <option value=""${p.derived ? '' : ' selected'}>(不連動,用自己的數字)</option>
+        ${allGroupOpts(p.derived ? p.derived.region : null, p.derived ? p.derived.group : null)}
+      </select></label>`}
       <label>備註<input class="eF" data-k="note" data-key="${esc(key)}" value="${esc(p.note||'')}"></label>
       <div class="efbtns">
         ${isMkt ? `<button class="del splitAdj" data-key="${esc(key)}" title="股票分割/合併:一次換算股數、每股成本與這一檔的減碼紀錄">÷× 分割調整</button>` : ''}
@@ -1739,7 +1747,15 @@ function wireEditing() {
     const {r, g, i, p} = findPos(el.dataset.key);
     if (!p) return;
     const k = el.dataset.k, v = el.value.trim();
-    if (k === '__move') {                       // 搬移到其他 basket
+    if (k === '__derive') {                     // 鏡像列改成連動合計(或取消)
+      if (!v) { delete p.derived; if (p.kind === 'derived') p.kind = 'static'; }
+      else {
+        const [rk2, gn2] = v.split('||');
+        if (rk2 === r.key && gn2 === g.name) { alert('不能連動自己所在的 basket'); return; }
+        p.derived = {region: rk2, group: gn2}; p.kind = 'derived'; p.dup = true;
+        DERIVED_CALC.forEach(f => delete p[f]);
+      }
+    } else if (k === '__move') {                       // 搬移到其他 basket
       const [rk2, gn2] = v.split('||');
       const r2 = P.regions.find(x => x.key === rk2);
       const g2 = r2 && r2.groups.find(x => x.name === gn2);
@@ -1815,6 +1831,7 @@ function wireEditing() {
     // 連動合計若指向舊名稱要一併改,避免斷鏈
     P.regions.forEach(rr => rr.groups.forEach(gg => gg.positions.forEach(pp => {
       if (pp.derived && pp.derived.region === r.key && pp.derived.subgrp === g.name) pp.derived.subgrp = nn;
+      if (pp.derived && pp.derived.region === r.key && pp.derived.group === g.name) pp.derived.group = nn;
       if (pp.subgrp === g.name) pp.subgrp = nn;
     })));
     g.name = nn; OPEN = null; commit();
