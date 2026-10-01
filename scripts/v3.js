@@ -899,9 +899,11 @@ function render() {
       const gmv = gmvAll;
       const gdupMv = g.positions.filter(p => p.dup).reduce((s,p) => s + effMv(p), 0);
       const gnet = gnd.reduce((s,p) => s + effMv(p), 0);
-      // 損益小計不含 dup:市值欄有「其中重複列示不計入」的揭露,損益欄沒有,
-      // 含進去會讓半導體視角的小計變成實際的數倍。
-      const gpl = gnd.reduce((s,p) => s + (ytdOf(p)||0), 0);
+      // v150:小計每一欄都是「含重複列示」口徑 —— 這一列就是上面列出來的每一列加總,
+      // 與區域標題(v148)、匯總報表(v149)一致;計入總資產的部分在左下角另外標。
+      // (以前市值含 dup、成本 / 損益 / 今日不含,跨區視角那一組的小計市值五萬多配損益個位數,使用者看不懂。)
+      const gall = g.positions;
+      const gpl = gall.reduce((s,p) => s + (ytdOf(p)||0), 0);
       const gkey = `${reg.key}||${g.name}`;
       const collapsed = !EDIT && COLLAPSED.has(fnv(gkey));
       out += `<div class="grp${collapsed ? ' collapsed' : ''}" data-gkey="${esc(gkey)}"><h3>${EDIT
@@ -996,18 +998,15 @@ function render() {
       // 小計報酬率 = Σ損益 ÷ Σ分母(不含 dup,與左欄 P&L 同口徑)。
       // 原本優先用報表的 report_total.ret —— 那是報表日的舊值,左欄損益卻是即時的,
       // 曾有 basket 損益為負卻掛著正報酬率、也有小計高估八個百分點的案例。
-      const gsr = sumRet(gnd);
+      const gsr = sumRet(gall);
       const gret = gsr
         ? `<span title="Σ損益 ÷ Σ(年初市值 + 年內買進成本)${gsr.cov < 99.5
             ? `;涵蓋本組 ${gsr.cov.toFixed(0)}% 市值` : ''}${g.report_total && g.report_total.ret != null
             ? `;報表小計 ${spct(g.report_total.ret)}(報表日口徑)` : ''}">${retCell(gsr)}</span>`
         : '—';
-      // 成本、未實現、今日一律用非重複列(gnd),與右邊的 YTD 欄同口徑。
-      // 原本這三欄用 g.positions(含 dup),半導體那一組的成本被算了兩次
-      // (多算了近五成)、未實現跟著多出一大塊,各組「今日」加總還會變成
-      // 遠大於 KPI 的數字 —— 同一頁上兩個數字互相打架。市值欄維持含 dup,
-      // 因為它下面本來就標了「其中重複列示 X 不重複計入」。
-      const gq = gnd.filter(p => p.q);
+      // 成本、未實現、今日與市值、YTD 同口徑(含重複列示,見上)。各組「今日」加總因此會大於 KPI,
+      // 差額就是鏡像列;小計左下角的「計入總資產」把這件事講明。
+      const gq = gall.filter(p => p.q);
       const gday = gq.reduce((s, p) => s + dayOf(p), 0);
       // 分母必須與分子同一個母體:只算「有報價、且不是鏡像列」那些部位的市值。
       // 用 gmv(含 dup、含沒報價的靜態部位)會把百分比稀釋掉 —— 有一組的鏡像列
@@ -1016,7 +1015,7 @@ function render() {
       const gqmv = gq.reduce((s, p) => s + effMv(p), 0);
       const gdayCell = gq.length
         ? `<span class="${cls(gday)}">${sign0(gday)}</span>` +
-          ((gqmv - gday) ? `<span class="sub ${cls(gday)}" title="以有連動報價的 ${fmt0(gqmv)} USD K 為分母(佔本組 ${(gqmv/(gmv||1)*100).toFixed(0)}%);其餘為鏡像列或無報價的報表部位">${spct(gday/(gqmv-gday)*100)}</span>` : '')
+          ((gqmv - gday) ? `<span class="sub ${cls(gday)}" title="以有連動報價的 ${fmt0(gqmv)} USD K 為分母(佔本組 ${(gqmv/(gmv||1)*100).toFixed(0)}%);其餘為無報價的報表部位">${spct(gday/(gqmv-gday)*100)}</span>` : '')
         : '<span class="mut">—</span>';
       // Breakeven 小計。be 的定義是「市值 ÷ 損益兩平值 − 1」(編輯模式那顆
       // 「由 Breakeven 反推成本」按鈕用的就是 cost = mv / (1 + be/100)),
@@ -1025,24 +1024,24 @@ function render() {
       // 這樣自動就是以金額加權,大部位不會被小部位的極端值稀釋。
       // 沒有 be 的部位整檔排除(分子分母都不計);排除的部分若佔比不小,
       // 在 title 裡講明白,免得看起來像涵蓋全組。
-      const gbeSrc = gnd.filter(p => beLive(p) != null && effMv(p) > 0 && (1 + beLive(p) / 100) > 0);
+      const gbeSrc = gall.filter(p => beLive(p) != null && effMv(p) > 0 && (1 + beLive(p) / 100) > 0);
       const gbeMv = gbeSrc.reduce((s, p) => s + effMv(p), 0);
       const gbeBase = gbeSrc.reduce((s, p) => s + effMv(p) / (1 + beLive(p) / 100), 0);
       const gbe = (gbeSrc.length && gbeBase > 0) ? (gbeMv / gbeBase - 1) * 100 : null;
-      const gbeCov = gnet > 0 ? gbeMv / gnet * 100 : 0;
+      const gbeCov = gmv > 0 ? gbeMv / gmv * 100 : 0;
       // 狀態小計:只在這一組有問題時才出現。個股列的徽章要展開整組才看得到,
       // 收合起來的組出了問題完全沒有訊號 —— 大部位靜靜掉出今日變動就是這樣發生的。
-      const gwarn = gnd.filter(p => p.q && String(p.q.qnote || '').startsWith('⚠'));
-      const gnoq = gnd.filter(p => p.kind === 'live' && !p.q);
+      const gwarn = gall.filter(p => p.q && String(p.q.qnote || '').startsWith('⚠'));
+      const gnoq = gall.filter(p => p.kind === 'live' && !p.q);
       const gstat = [
         gwarn.length ? `<span class="badge warn" title="${esc(gwarn.map(p =>
             p.name + ':' + p.q.qnote).join('、'))}">⚠ ${gwarn.length}</span>` : '',
         gnoq.length ? `<span class="badge warn" title="${esc(gnoq.map(p =>
             p.name).join('、'))}">待接報價 ${gnoq.length}</span>` : '',
       ].filter(Boolean).join(' ');
-      const gck = gnd.map(costK).filter(v => v != null).reduce((s,v)=>s+v, 0);
-      const guk = gnd.map(unrealK).filter(v => v != null).reduce((s,v)=>s+v, 0);
-      const hasCost = gnd.some(p => costK(p) != null);
+      const gck = gall.map(costK).filter(v => v != null).reduce((s,v)=>s+v, 0);
+      const guk = gall.map(unrealK).filter(v => v != null).reduce((s,v)=>s+v, 0);
+      const hasCost = gall.some(p => costK(p) != null);
       out += `<tr class="subtotal"><td>小計<span class="sub">計入總資產 ${fmt0(gnet)}(${(gnet/tot*100).toFixed(1)}%)`
         + (gdupMv ? ` · 其中重複列示 ${fmt0(gdupMv)} 不重複計入` : '') + `</span>${warn}</td>` +
         `<td class="num">${fmt0(gmv)}</td><td class="num xs-hide">100.0%</td>` +
