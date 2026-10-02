@@ -1698,6 +1698,11 @@ function editorRow(p, key, reg, g) {
         <option value=""${p.derived ? '' : ' selected'}>(不連動,用自己的數字)</option>
         ${allGroupOpts(p.derived ? p.derived.region : null, p.derived ? p.derived.group : null)}
       </select></label>`}
+      <label title="券商對帳單上的代號(多個用逗號分開;同一檔在兩個帳戶就填兩個)。沒填的部位不會被對帳單更新">對帳單代號<input class="eF" data-k="stmt_code" data-key="${esc(key)}" value="${esc(Array.isArray(p.stmt_code) ? p.stmt_code.join(', ') : (p.stmt_code || ''))}" placeholder="例:XXXX LN, XXXX US"></label>
+      <label>對帳單幣別<select class="eF" data-k="stmt_cur" data-key="${esc(key)}">
+        <option value=""${!p.stmt_cur ? ' selected' : ''}>(同對帳單該列)</option>
+        ${['TWD','JPY','KRW','HKD','CNY','USD','EUR','GBP','CHF','SGD','AUD'].map(c=>`<option${p.stmt_cur===c?' selected':''}>${c}</option>`).join('')}
+      </select></label>
       <label>備註<input class="eF" data-k="note" data-key="${esc(key)}" value="${esc(p.note||'')}"></label>
       <div class="efbtns">
         ${isMkt ? `<button class="del splitAdj" data-key="${esc(key)}" title="股票分割/合併:一次換算股數、每股成本與這一檔的減碼紀錄">÷× 分割調整</button>` : ''}
@@ -1779,6 +1784,9 @@ function wireEditing() {
       const r2 = P.regions.find(x => x.key === rk2);
       const g2 = r2 && r2.groups.find(x => x.name === gn2);
       if (g2 && g2 !== g) { g.positions.splice(i, 1); g2.positions.push(p); OPEN = null; }
+    } else if (k === 'stmt_code') {               // 逗號 / 頓號分隔 → 陣列;空白 = 不對應
+      const arr = v.split(/[,、;]/).map(x => x.trim()).filter(Boolean).slice(0, 8);
+      if (arr.length) p.stmt_code = arr; else delete p.stmt_code;
     } else if (['units_manual','cost','cost_k'].includes(k)) {
       p[k] = v === '' ? null : (isNaN(+v.replace(/,/g,'')) ? null : +v.replace(/,/g,''));
       if (p[k] == null) delete p[k];
@@ -1982,8 +1990,9 @@ function applyOverlay(o) {
       if (qmap[k]) p.q = qmap[k];
       const c = cfg[k];
       if (c) Object.keys(c).forEach(f => {
-        // 純設定欄位以 bundle 為準;匯入會寫入的欄位只在覆寫檔缺少時補回
-        if (BACKFILL_FIELDS.includes(f) && p[f] != null) return;
+        // 匯入會寫入的欄位只在覆寫檔缺少時補回;v151 起 stmt_code / stmt_cur 也是 —— 編輯模式
+        // 與匯入預覽都能設它們了,bundle 的對應表只當「覆寫檔沒有時的預設」。
+        if ((BACKFILL_FIELDS.includes(f) || f === 'stmt_code' || f === 'stmt_cur') && p[f] != null) return;
         p[f] = c[f];
       });
     })));
@@ -2659,6 +2668,20 @@ function stmtDiff(recs) {
   return {changes, unmatched, skipped, needFx};
 }
 
+// 匯入預覽裡「對應到哪個部位」的選項:只列還沒有對帳單代號、也不是鏡像列的部位
+function stmtMapOpts() {
+  return P.regions.flatMap(r => r.groups.flatMap(g => g.positions.map((p, i) =>
+    (!isDup(p) && !(p.stmt_code && p.stmt_code.length))
+      ? `<option value="${esc(`${r.key}||${g.name}||${i}`)}">${esc(r.name.replace('部位', ''))} › ${esc(g.name)} › ${esc(p.name)}</option>` : ''))).join('');
+}
+// 把對帳單的一筆記到某個部位上(純函式,測試直接呼叫):回傳有沒有改到
+function stmtMapTo(key, code, cur) {
+  const {p} = findPos(key);
+  if (!p || !code) return false;
+  p.stmt_code = [String(code)];
+  if (cur && !p.stmt_cur) p.stmt_cur = String(cur).toUpperCase();
+  return true;
+}
 function stmtDiffHtml(d) {
   const num = (v, dp) => v == null ? '—' : (+v).toLocaleString('en-US',
       {minimumFractionDigits: dp, maximumFractionDigits: dp});
@@ -2686,8 +2709,10 @@ function stmtDiffHtml(d) {
       <tbody>${rows}</tbody></table></div>`
       : '<div class="note">沒有任何差異 —— 目前持倉與這份對帳單一致。</div>'}
     ${d.unmatched.length ? `<div class="note" style="margin-top:10px">
-      <b>對帳單有、看板沒對應的 ${d.unmatched.length} 筆</b>(不會被匯入,需要先建立部位並指定代號):<br>
-      ${d.unmatched.map(r => esc(r.code + ' ' + r.name)).join('、')}</div>` : ''}
+      <b>對帳單有、看板沒對應的 ${d.unmatched.length} 筆</b>(不會被匯入)。在右邊選一個部位就會把這個代號記到那個部位上,預覽立刻重算;
+      看板上沒有的,先取消、到編輯模式新增部位再匯入一次:<br>
+      <table style="margin-top:4px">${d.unmatched.map(r => `<tr><td>${esc(r.code)} ${esc(r.name)}<span class="tk">${esc(r.cur)} · 市值 ${(+r.mv_k || 0).toLocaleString('en-US', {maximumFractionDigits: 0})} K</span></td>
+        <td><select class="stmtMap" data-code="${esc(r.code)}" data-cur="${esc(r.cur)}"><option value="">(不對應)</option>${stmtMapOpts()}</select></td></tr>`).join('')}</table></div>` : ''}
     ${(() => { const g = d.changes.filter(c => c.gone).length, t = d.changes.length;
         return (g >= 3 && g >= t / 3) ? `<div class="note warnnote" style="margin-top:8px">
           ⚠ 這次要移除 <b>${g}</b> 個部位。若對帳單只涵蓋部分帳戶,請先取消再確認檔案是否完整。</div>` : ''; })()}
@@ -2711,14 +2736,33 @@ async function importStmt(file) {
     const rows = /\.csv$/i.test(file.name)
       ? csvRows(await file.text())
       : await xlsxRows(await file.arrayBuffer());
-    const d = stmtDiff(parseStmt(rows));
+    const recs = parseStmt(rows);
+    let d = stmtDiff(recs);
     msg.textContent = '';
-    document.body.insertAdjacentHTML('beforeend', stmtDiffHtml(d));
     const close = () => { const el = $('stmtBg'); if (el) el.remove(); };
-    $('stmtCancel').addEventListener('click', close);
-    $('stmtBg').addEventListener('click', e => { if (e.target.id === 'stmtBg') close(); });
-    const ap = $('stmtApply');
-    if (ap) ap.addEventListener('click', () => {
+    // 預覽裡做的對應先記著:按「套用」才算數,取消就原樣還原(不留在記憶體裡等下次 commit 偷偷存掉)
+    const undo = [];
+    const cancel = () => {
+      undo.reverse().forEach(u => { if (u.code == null) delete u.p.stmt_code; else u.p.stmt_code = u.code;
+                                    if (u.cur == null) delete u.p.stmt_cur; else u.p.stmt_cur = u.cur; });
+      undo.length = 0; close();
+    };
+    const show = () => {
+      close();
+      document.body.insertAdjacentHTML('beforeend', stmtDiffHtml(d));
+      $('stmtCancel').addEventListener('click', cancel);
+      $('stmtBg').addEventListener('click', e => { if (e.target.id === 'stmtBg') cancel(); });
+      // 未對應的列:選了部位就把代號記到那個部位、重算預覽
+      document.querySelectorAll('.stmtMap').forEach(sel => sel.addEventListener('change', () => {
+        if (!sel.value) return;
+        const {p} = findPos(sel.value);
+        if (p) undo.push({p, code: p.stmt_code ?? null, cur: p.stmt_cur ?? null});
+        if (stmtMapTo(sel.value, sel.dataset.code, sel.dataset.cur)) { d = stmtDiff(recs); show(); }
+      }));
+      const ap = $('stmtApply');
+      if (ap) ap.addEventListener('click', onApply);
+    };
+    const onApply = () => {
       const drop = new Set();
       // 出清的部位:以「最後看到的價格」凍結其年度損益快照,計入 closed_ytd。
       // 之後 KPI 與走勢圖的 YTD 會把這筆帶著走,口徑與券商年度報表一致
@@ -2794,7 +2838,8 @@ async function importStmt(file) {
       commit();
       msg.textContent = '已套用,正在同步到所有裝置…';
       setTimeout(() => { msg.textContent = ''; }, 4000);
-    });
+    };
+    show();
   } catch (e) {
     msg.textContent = '匯入失敗:' + e.message;
   }
