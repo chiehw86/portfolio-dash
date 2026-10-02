@@ -194,9 +194,9 @@ o["dropped"] = sorted({str(x)[:16] for x in (o.get("dropped") if isinstance(o.ge
                        if isinstance(x, str)})[:MAX_LIST]
 o["stmt_asof"] = _str(o.get("stmt_asof"))
 
-# stmt_code / stmt_cur 是「設定」不是「使用者資料」:對帳單代號對應表由 bundle 擁有,
-# 網頁上沒有任何介面可以改它。覆寫檔是在加這些欄位之前產生的,若讓它整份蓋掉 regions,
-# 對應表就會被抹掉、對帳單匯入永遠比對不到東西。所以合併後要把它們補回去。
+# stmt_code / stmt_cur 原本是「設定」不是「使用者資料」:對帳單代號對應表由 bundle 擁有。
+# 覆寫檔是在加這些欄位之前產生的,若讓它整份蓋掉 regions,對應表就會被抹掉、對帳單匯入永遠比對不到東西。
+# 所以合併後要把它們補回去 —— v151 起只在覆寫檔缺少時補(網頁上可以改了)。
 CFG_FIELDS      = ("stmt_code", "stmt_cur", "ytd_base", "ytd_base_mv", "ytd_base_cost")
 BACKFILL_FIELDS = ("stmt_real_k",)
 
@@ -220,7 +220,9 @@ for _r in P["regions"]:
                 # 純設定欄位:bundle 說了算(網頁上沒有介面能改它們)。
                 # 匯入會寫入的欄位(累積已實現):只在覆寫檔缺少時補,
                 # 否則會把使用者剛匯入的新對帳單數字倒退回 bundle 的舊值。
-                if f in BACKFILL_FIELDS and _p.get(f) is not None:
+                # v151:stmt_code / stmt_cur 也改成「覆寫檔有就用覆寫檔的」—— 編輯模式與匯入預覽都能設它們了,
+                # bundle 的對應表只當覆寫檔沒有時的預設(不然使用者在網頁上對好的代號下一輪就被改回去)。
+                if (f in BACKFILL_FIELDS or f in ("stmt_code", "stmt_cur")) and _p.get(f) is not None:
                     continue
                 if _p.get(f) != v:
                     _p[f] = v; _n += 1
