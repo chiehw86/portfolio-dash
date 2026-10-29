@@ -217,6 +217,13 @@ def main():
                                     "src": "stmt"})
                     except Exception:
                         pass
+                # v153:第一次接上對帳單的部位(沒有累積已實現、沒有年初基準)→ 以此刻為基準,
+                # 年初累積損益 = 現在的累積已實現(買回出清過的部位時,賣掉那段的獲利已在 closed_ytd,
+                # 不能再算一次;與前端 importStmt 同一條規則)。
+                if p.get("stmt_real_k") is None and p.get("ytd_base") is None and real is not None:
+                    p["ytd_base"] = real
+                    p["ytd_base_mv"] = round(sum(h["mv"] for h in hits), 3)
+                    p["ytd_base_cost"] = round(sum(h["cost"] for h in hits), 3)
                 p["units_manual"], p["cost"], p["cost_src"] = u, per, "stmt"
                 p["stmt_real_k"] = real
                 _bv = [h for h in hits if h.get("be") is not None and h["cost"]]
@@ -253,6 +260,11 @@ def main():
                     ck = float(u) * float(p["cost"]) / FX.get(q.get("cur"), 1) / 1000.0
                     w = p.get("wgt") or 1.0
                     v = mv - ck + ((p.get("stmt_real_k") or 0) - (p.get("ytd_base") or 0)) * w / f
+                elif (p.get("kind") != "live" and p.get("stmt_real_k") is not None
+                      and p.get("ytd_base") is not None and f):
+                    # v152:靜態部位賣光 → 市值與成本都是 0,年度損益只剩「累積已實現 − 年初累積損益」
+                    # (與前端 closedYtdOf 同一條);報表上的 pl 是賣掉前的快照,不能再用。
+                    v = (float(p["stmt_real_k"]) - float(p["ytd_base"])) * (p.get("wgt") or 1.0) / f
                 else:
                     v = p.get("pl") or 0
                 # 以前這裡有 abs(v) >= 0.5 的門檻:算不出可靠的年度損益(例如那一輪
