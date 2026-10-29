@@ -222,7 +222,9 @@ for _r in P["regions"]:
                 # 否則會把使用者剛匯入的新對帳單數字倒退回 bundle 的舊值。
                 # v151:stmt_code / stmt_cur 也改成「覆寫檔有就用覆寫檔的」—— 編輯模式與匯入預覽都能設它們了,
                 # bundle 的對應表只當覆寫檔沒有時的預設(不然使用者在網頁上對好的代號下一輪就被改回去)。
-                if (f in BACKFILL_FIELDS or f in ("stmt_code", "stmt_cur")) and _p.get(f) is not None:
+                # v153:ytd_base* 也改成覆寫檔優先(買回出清過的部位時,網頁把年初基準設成買回當下的累積已實現;
+                # bundle 的年初值蓋回來會讓賣掉那段的獲利與「已出清」重複計入)。現在所有欄位都是「覆寫檔缺少時才補」。
+                if _p.get(f) is not None:
                     continue
                 if _p.get(f) != v:
                     _p[f] = v; _n += 1
