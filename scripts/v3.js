@@ -428,6 +428,16 @@ const stmtCurOf = p => p.stmt_cur || (p.q && p.q.cur) || p.cur;
 // 年初基準,YTD 會變成好幾倍的負數。
 const wgtOf = p => p.wgt || 1;
 
+// 出清當下的年度損益。靜態部位(基金)平常的 YTD 是報表值(p.pl),但賣光之後報表那個數字
+// 已經不代表任何東西;有對帳單欄位的,用與上市部位同一條公式 —— 市值與成本都是 0,
+// 只剩「累積已實現 − 年初累積損益」。沒有對帳單欄位的才退回報表值。
+function closedYtdOf(p) {
+  if (p.kind !== 'live' && p.stmt_real_k != null && p.ytd_base != null) {
+    const f = FX[stmtCurOf(p)];
+    if (f) return (p.stmt_real_k - p.ytd_base) * (+p.wgt || 1) / f;
+  }
+  return ytdOf(p);
+}
 function ytdOf(p) {
   if (p.stmt_real_k == null) return p.pl ?? null;        // 靜態部位:報表值
   const f = FX[stmtCurOf(p)];
@@ -1992,7 +2002,9 @@ function applyOverlay(o) {
       if (c) Object.keys(c).forEach(f => {
         // 匯入會寫入的欄位只在覆寫檔缺少時補回;v151 起 stmt_code / stmt_cur 也是 —— 編輯模式
         // 與匯入預覽都能設它們了,bundle 的對應表只當「覆寫檔沒有時的預設」。
-        if ((BACKFILL_FIELDS.includes(f) || f === 'stmt_code' || f === 'stmt_cur') && p[f] != null) return;
+        // v153:ytd_base* 也是 —— 買回出清過的部位時,網頁會把年初基準設成買回當下的累積已實現,
+        // bundle 裡那組年初值若蓋回來,賣掉那段的獲利就會跟「已出清」重複計入。
+        if (p[f] != null) return;
         p[f] = c[f];
       });
     })));
@@ -2611,6 +2623,13 @@ function stmtDiff(recs) {
     const costLocal = hits.reduce((s, h) => s + h.cost_k, 0) * 1000;
 
     if (p.kind !== 'live') {
+      // v152:靜態部位也會出清。對帳單上那一列還在、但單位數與市值都是 0,就是賣光了 ——
+      // 以前這裡只會把市值更新成 0,部位留在表上、不進「已出清」(2026-10-29 一檔基金就是這樣)。
+      // 伺服器端 apply_statement.py 本來就以「股數為 0」當出清,這裡對齊。
+      if (!hits.some(h => h.shares) && !hits.some(h => h.mv_k)) {
+        changes.push({p, label: p.name, gone: true, oldU: null, oldC: null});
+        return;
+      }
       // 靜態 NAV 部位(海外基金)沒有股數概念,對帳單給的是市值 —— 直接換算成 USD K。
       // 每一列各自用自己的幣別換(同一檔基金可能一列瑞郎、一列日圓)。
       const miss = hits.filter(h => !FX[h.cur]).map(h => h.cur);
@@ -2658,6 +2677,8 @@ function stmtDiff(recs) {
                   realK, stmtCur, realChanged, realBack,
                   // 減碼紀錄的防呆要用到「這次對帳單上的每股市價」
                   mvK: hits.reduce((s, h) => s + (h.mv_k || 0), 0),
+                  costS: costLocal / 1000,                        // 對帳單幣別 K,首次匯入時當年度分母的基準
+                  firstImport: p.stmt_real_k == null && p.ytd_base == null,
                   beSnap: beOf(hits), beNew: null, beOld: p.be});
   })));
 
@@ -2770,7 +2791,7 @@ async function importStmt(file) {
       P.closed_ytd = P.closed_ytd || [];
       d.changes.forEach(c => {
         if (!c.gone || c.p.dup) return;
-        const v = ytdOf(c.p);
+        const v = closedYtdOf(c.p);
         // 不再用「算得出且 >= 0.5」當門檻。算不出來就記 0:金額 0 對加總無害,
         // 但那一列會出現在追蹤表上 —— 靜靜跳過會讓部位與它的年度損益一起消失,
         // 而且事後完全看不出來(2026-09-02 兩檔韓股就是這樣)。
@@ -2820,6 +2841,14 @@ async function importStmt(file) {
         if (c.static) { c.p.mv = +c.newMv.toFixed(1); stampNav(c.p);
                         if (c.beNew != null) c.p.be = c.beNew; return; }
         if (c.gone) { drop.add(c.p); return; }
+        // v153:這個部位第一次接上對帳單(沒有累積已實現、也沒有年初基準)→ 以這一刻為基準:
+        // 年初累積損益 = 現在的累積已實現。買回曾經出清的部位時,賣掉那一段的獲利已經記在
+        // 「已出清」裡了,新部位只能從買回之後開始算,否則同一筆獲利會被算兩次。
+        if (c.firstImport && c.realK != null) {
+          c.p.ytd_base = c.realK;
+          c.p.ytd_base_mv = +(c.mvK || 0).toFixed(3);
+          c.p.ytd_base_cost = +(c.costS || 0).toFixed(3);
+        }
         c.p.units_manual = c.newU;
         c.p.cost = c.newC;
         c.p.cost_src = 'stmt';
