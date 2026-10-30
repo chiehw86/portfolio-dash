@@ -199,6 +199,172 @@ def _load_tw_realtime(codes):
         return "未取得(程式例外)"
 
 
+# ── 日股 / 韓股盤中:即時來源(v154)──────────────────────────────────────
+# 跟台股同一套想法:Yahoo 對日 / 韓股延遲 20 分鐘,開盤後頭一輪永遠只有前一場的收盤。
+#   日股:Yahoo!ファイナンス(日本版)的個股頁是東證即時價(免費、不用登入),頁面內嵌
+#         window.__PRELOADED_STATE__ 這份 JSON,裡面有 price / priceDateTime / previousPrice。
+#         盤中 priceDateTime 是「HH:MM」;收盤後或休市會變成日期「MM/DD」—— 只收 HH:MM 這種,
+#         其餘一律當成不是今天的盤中價。鍵名可能改版,所以是「遞迴找同時有 price 與 priceDateTime
+#         的物件」,找不到就整段放棄(行為與以前相同)。一檔一個請求,日股只有幾檔。
+#   韓股:Naver 金融的 polling 端點(即時、JSON、一次可問多檔):datas[].closePrice /
+#         compareToPreviousClosePrice / localTradedAt。只收 localTradedAt 是首爾今天的。
+# 兩邊都只在該市場交易時段內跑;每一檔另外在 _fetch_one 裡與 Yahoo 的延遲價比對(差超過漲跌幅
+# 限制就不信:日股大型股 ±10% 左右取 11%,韓股 ±30% 取 31%)。端點掛了、格式變了 → 整段略過。
+# log 只印原因類別,不印檔數、代號、價格。
+JP_RT = {}                        # code -> (成交價, 昨收 或 None)
+KR_RT = {}
+RT_LIMIT = {"TPE": 0.11, "TYO": 0.11, "KRX": 0.31}
+
+
+def _rt_window(ex):
+    _d, _h = _local(ex)
+    return _d, (_d.weekday() < 5 and WINDOWS[ex][0] <= _h <= WINDOWS[ex][1])
+
+
+def _rt_num(x):
+    try:
+        v = float(str(x).replace(",", "").replace("+", "").strip())
+        return v if v > 0 else None
+    except Exception:
+        return None
+
+
+def _find_price_obj(o, depth=0):
+    """在 Yahoo 日本版的 preloaded state 裡找「同時有 price 與 priceDateTime」的物件。"""
+    if depth > 12:
+        return None
+    if isinstance(o, dict):
+        if "price" in o and "priceDateTime" in o:
+            return o
+        for v in o.values():
+            r = _find_price_obj(v, depth + 1)
+            if r is not None:
+                return r
+    elif isinstance(o, list):
+        for v in o:
+            r = _find_price_obj(v, depth + 1)
+            if r is not None:
+                return r
+    return None
+
+
+def _load_jp_realtime(codes):
+    _d, _open = _rt_window("TYO")
+    if not codes or not _open:
+        return "非交易時段,略過"
+    why = []
+
+    def _fail(r):
+        if r not in why: why.append(r)
+    got_any_resp = False
+    try:
+        for code in sorted(codes):
+            try:
+                req = urllib.request.Request(f"https://finance.yahoo.co.jp/quote/{code}.T",
+                                             headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "ja"})
+                html = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "ignore")
+            except Exception:
+                _fail("連線失敗"); continue
+            got_any_resp = True
+            m = re.search(r"window\.__PRELOADED_STATE__\s*=\s*", html)
+            if not m:
+                _fail("頁面沒有 PRELOADED_STATE"); continue
+            try:
+                state, _ = json.JSONDecoder().raw_decode(html, m.end())   # 從 { 開始解到對應的 },後面有別的 JS 也無妨
+            except Exception:
+                _fail("state 不是 JSON"); continue
+            pb = _find_price_obj(state)
+            if pb is None:
+                _fail("沒有價格欄位"); continue
+            px = _rt_num(pb.get("price"))
+            when = str(pb.get("priceDateTime") or "").strip()
+            if px is None:
+                _fail("成交價"); continue
+            if not re.match(r"^\d{1,2}:\d{2}$", when):              # 盤中才是 HH:MM;收盤後 / 休市是 MM/DD
+                _fail("不是今天盤中"); continue
+            prev = None
+            for k in ("previousPrice", "previousClose", "prevPrice"):
+                v = pb.get(k)
+                if v is None:
+                    md = state.get("mainStocksDetail") if isinstance(state, dict) else None
+                    if isinstance(md, dict) and isinstance(md.get("detail"), dict):
+                        v = md["detail"].get(k)
+                if v is not None:
+                    prev = _rt_num(v); break
+            if prev and abs(px / prev - 1) > RT_LIMIT["TYO"]:
+                _fail("漲跌幅度"); continue
+            JP_RT[code] = (px, prev)
+        if not JP_RT:
+            return "未取得(" + ("檢查未過:" + "、".join(why) if why else "沒有回應") + ")"
+        if why or len(JP_RT) < len(codes):
+            return "部分採用" + (f"(檢查未過:{'、'.join(why)})" if why else "")
+        return "採用"
+    except Exception:
+        JP_RT.clear()
+        return "未取得(程式例外)"
+
+
+def _load_kr_realtime(codes):
+    _d, _open = _rt_window("KRX")
+    if not codes or not _open:
+        return "非交易時段,略過"
+    today = _d.isoformat()
+    why = []
+
+    def _fail(r):
+        if r not in why: why.append(r)
+    try:
+        url = "https://polling.finance.naver.com/api/realtime/domestic/stock/" + ",".join(sorted(codes))
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                                       "Referer": "https://finance.naver.com/"})
+            raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "ignore")
+        except Exception:
+            return "未取得(連線失敗)"
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return "未取得(回應不是 JSON)"
+        rows = data.get("datas") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            return "未取得(回應沒有 datas)"
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            code = str(r.get("itemCode") or "").strip()
+            if code not in codes:
+                continue
+            when = str(r.get("localTradedAt") or "")
+            if not when.startswith(today):
+                _fail("不是今天"); continue
+            px = _rt_num(r.get("closePrice"))
+            if px is None:
+                _fail("成交價"); continue
+            prev = None
+            chg = r.get("compareToPreviousClosePrice")
+            try:
+                if chg is not None and str(chg).strip() != "":
+                    c = float(str(chg).replace(",", "").replace("+", ""))
+                    # 跌時 Naver 給正數 + 方向碼(compareToPreviousPrice.code),不一定有負號:
+                    # 用 fluctuationsRatio 的正負決定方向
+                    fr = str(r.get("fluctuationsRatio") or "")
+                    if fr.strip().startswith("-") and c > 0: c = -c
+                    prev = px - c if px - c > 0 else None
+            except Exception:
+                prev = None
+            if prev and abs(px / prev - 1) > RT_LIMIT["KRX"]:
+                _fail("漲跌幅度"); continue
+            KR_RT[code] = (px, prev)
+        if not KR_RT:
+            return "未取得(" + ("檢查未過:" + "、".join(why) if why else "回應裡沒有這些代號") + ")"
+        if why or len(KR_RT) < len(codes):
+            return "部分採用" + (f"(檢查未過:{'、'.join(why)})" if why else "(部分代號沒有回應)")
+        return "採用"
+    except Exception:
+        KR_RT.clear()
+        return "未取得(程式例外)"
+
+
 def expected_session(t):
     """該標的「此刻應該要有」的最後交易日(以交易所當地時間推算,不含國定假日)。
     只用來偵測資料源落後 —— 假日會誤判成落後,但那只是多一個警示標記,
@@ -359,6 +525,8 @@ tickers = sorted({p["ticker"] for p in pos_all if p.get("ticker") and p.get("kin
 # 台股即時行情:一個請求抓完全部(只在台股交易時段內;log 不印檔數)
 print("tw-realtime: " + _load_tw_realtime(
     {t.split(":")[0] for t in tickers if t.endswith(":TPE")}))
+print("jp-realtime: " + _load_jp_realtime({t.split(":")[0] for t in tickers if t.endswith(":TYO")}))
+print("kr-realtime: " + _load_kr_realtime({t.split(":")[0] for t in tickers if t.endswith(":KRX")}))
 
 # 已出清部位也要抓價(「出清後表現」追蹤用)。closed_ytd 可能由網頁匯入寫入,
 # 存在 merge_overlay 產出的 portfolio.json,優先讀它;沒有再退回 bundle。
@@ -719,9 +887,15 @@ def _fetch_one(t):
             price, prev, sess = get_price_prev(to_yahoo(t), expected_session(t), live)
             # 台股交易時段內,現價改用證交所即時行情(Yahoo 延遲 20 分鐘);
             # 場次就是今天。前收接著由下面的官方收盤那段覆蓋,與原本一致。
-            _rt = TW_RT.get(t.split(":")[0]) if (live and t.endswith(":TPE")) else None
+            _rtex = t.partition(":")[2]
+            _rtmap = {"TPE": TW_RT, "TYO": JP_RT, "KRX": KR_RT}.get(_rtex)
+            _rt = _rtmap.get(t.split(":")[0]) if (live and _rtmap) else None
+            # v154:日 / 韓的即時價還要跟 Yahoo 的延遲價比:差超過該市場的漲跌幅限制就不信
+            # (台股已在 _load_tw_realtime 裡對過官方昨收,不再比)
+            if _rt and _rtex != "TPE" and price and abs(_rt[0] / price - 1) > RT_LIMIT.get(_rtex, 0.11):
+                _rt = None
             if _rt:
-                price, sess = _rt[0], _local("TPE")[0]
+                price, sess = _rt[0], _local(_rtex)[0]
             # 台股:前收一律以交易所官方收盤為準。盤中時官方最新的那一筆就是前收
             # (今天還沒收),不必去猜日線缺的是哪一根。收盤後只做交叉比對:
             # 兩邊差超過 0.5% 就標出來,不默默採用其中一個。
