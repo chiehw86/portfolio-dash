@@ -79,6 +79,7 @@ const $ = id => document.getElementById(id);
 // 進 innerHTML —— 2026-09-08 複審實測可注入 <img onerror>。非有限值一律顯示 —。
 const _n = x => { const v = typeof x === 'number' ? x : Number(x); return Number.isFinite(v) ? v : null; };
 const fmt0 = x => { const v = _n(x); return v == null ? '—' : v.toLocaleString('en-US', {maximumFractionDigits: 0}); };
+const fmtPx = v => !isFinite(v) ? '—' : v.toLocaleString('en-US', {minimumFractionDigits: v >= 1000 ? 0 : v >= 100 ? 1 : 2, maximumFractionDigits: v >= 1000 ? 0 : v >= 100 ? 1 : 2});
 const fmt1 = x => { const v = _n(x); return v == null ? '—' : v.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 1}); };
 const sign0 = x => { const v = _n(x); return v == null ? '—' : (v >= 0 ? '+' : '') + fmt0(v); };
 const spct = x => { const v = _n(x); return v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%'; };
@@ -926,8 +927,12 @@ function render() {
         <th class="num xs-hide" title="市值 ÷ 累積成本 − 1(券商對帳單 Breakeven Return 的定義);有成本的部位以即時價計算,報表部位為匯入時的快照">Breakeven</th><th class="num">YTD P&L</th><th class="num">YTD Ret</th><th class="num">今日</th><th>狀態</th>${EDIT?'<th></th>':''}</tr></thead><tbody>`;
       const rowHtml = (p, pi, extraCls) => {
         const mv = effMv(p);
+        // v155:有市場報價的部位在市值底下多一行現價(原幣),使用者 2026-10-30 要求。
+        // 小數位數依價位:≥1000 不帶小數(日 / 韓股、台股高價股),≥100 一位,其餘兩位。
+        const pxTxt = (p.kind === 'live' && p.q && p.q.price != null && !p.derived)
+          ? `<span class="sub px" title="最新報價(原幣)">${fmtPx(+p.q.price)}${p.q.cur ? ' ' + esc(p.q.cur) : ''}</span>` : '';
         const mvCell = ((p.kind === 'live' && p.q) || p.derived)
-          ? `${fmt0(mv)}`
+          ? `${fmt0(mv)}${pxTxt}`
           : `<input class="mvI" data-reg="${esc(reg.key)}" data-grp="${esc(g.name)}" data-i="${pi}" value="${esc(p.mv ?? '')}">`;
         const dk = dayOf(p);
         // 前收兩源不一致時,把兩個候選值放進 title,滑鼠移上去就看得到實際數字
