@@ -356,12 +356,9 @@ def px_prev(t, sess, today_local):
 pos_all = [p for r in P["regions"] for g in r["groups"] for p in g["positions"]]
 cur_of = {p["ticker"]: p.get("cur", "USD") for p in pos_all if p.get("ticker")}
 tickers = sorted({p["ticker"] for p in pos_all if p.get("ticker") and p.get("kind") == "live"})
-# 台股即時行情:一個請求抓完全部(只在台股交易時段內;log 不印檔數)
-print("tw-realtime: " + _load_tw_realtime(
-    {t.split(":")[0] for t in tickers if t.endswith(":TPE")}))
 
-# 已出清部位也要抓價(「出清後表現」追蹤用)。closed_ytd 可能由網頁匯入寫入,
-# 存在 merge_overlay 產出的 portfolio.json,優先讀它;沒有再退回 bundle。
+# merge_overlay 產出的 portfolio.json = bundle + 網頁上的修改。已出清的追蹤價、以及(v157)
+# 網頁上新增的部位都在這裡,不在 bundle 裡;優先讀它,沒有再退回 bundle。
 try:
     _Pm = json.load(open("portfolio.json")) if os.path.exists("portfolio.json") else P
 except Exception:
@@ -370,6 +367,32 @@ except Exception:
 # 不能讓它塞進路徑符號、也不能讓上千個代號把整輪抓價拖到超時。
 import re as _re
 _TK_OK = _re.compile(r"^[A-Za-z0-9.^=\-]{1,24}(:[A-Za-z]{2,10})?$")
+_CUR_OK = _re.compile(r"^[A-Z]{3,5}$")
+
+# v157:網頁上新增的上市部位(匯入預覽「＋ 新增到」、編輯模式「＋」)以前永遠抓不到價 ——
+# 抓價只看 bundle 的持倉,畫面上一直是「報價待接」(2026-11-02 兩檔韓股)。
+_web_n = 0
+try:
+    for _r in (_Pm.get("regions") or []):
+        for _g in (_r.get("groups") or []) if isinstance(_r, dict) else []:
+            for _p in (_g.get("positions") or []) if isinstance(_g, dict) else []:
+                if not isinstance(_p, dict) or _p.get("kind") != "live":
+                    continue
+                _t = _p.get("ticker")
+                if not (isinstance(_t, str) and _TK_OK.match(_t)) or _t in tickers or _web_n >= 60:
+                    continue
+                tickers.append(_t); _web_n += 1
+                _c = str(_p.get("cur") or "").upper()
+                cur_of.setdefault(_t, _c if _CUR_OK.match(_c) else "USD")
+except Exception:
+    pass
+tickers = sorted(tickers)
+
+# 台股即時行情:一個請求抓完全部(只在台股交易時段內;log 不印檔數)
+print("tw-realtime: " + _load_tw_realtime(
+    {t.split(":")[0] for t in tickers if t.endswith(":TPE")}))
+
+# 已出清部位也要抓價(「出清後表現」追蹤用)。
 _closed_tk = [c.get("ticker") for c in (_Pm.get("closed_ytd") or [])
               if isinstance(c, dict) and isinstance(c.get("ticker"), str) and _TK_OK.match(c["ticker"])]
 for _t in _closed_tk[:60]:
