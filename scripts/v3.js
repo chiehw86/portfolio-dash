@@ -2696,9 +2696,39 @@ function stmtDiff(recs) {
 
 // 匯入預覽裡「對應到哪個部位」的選項:只列還沒有對帳單代號、也不是鏡像列的部位
 function stmtMapOpts() {
-  return P.regions.flatMap(r => r.groups.flatMap(g => g.positions.map((p, i) =>
+  const existing = P.regions.flatMap(r => r.groups.flatMap(g => g.positions.map((p, i) =>
     (!isDup(p) && !(p.stmt_code && p.stmt_code.length))
       ? `<option value="${esc(`${r.key}||${g.name}||${i}`)}">${esc(r.name.replace('部位', ''))} › ${esc(g.name)} › ${esc(p.name)}</option>` : ''))).join('');
+  // v156:看板上沒有這個部位(新買的、或買回出清過的)→ 直接新增到某個 basket
+  const fresh = P.regions.flatMap(r => r.groups.map(g =>
+    `<option value="${esc(`new||${r.key}||${g.name}`)}">＋ 新增到 ${esc(r.name.replace('部位', ''))} › ${esc(g.name)}</option>`)).join('');
+  return `<optgroup label="對應到現有部位">${existing}</optgroup><optgroup label="新增部位">${fresh}</optgroup>`;
+}
+// 對帳單代號 → 看板代號(v156)。對帳單的代號是「代碼 + 空格 + 市場」(彭博式):
+// TT 台灣、JP 日本、KS 韓國、HK 香港、LN 倫敦、CH 中國(6 開頭上海、其餘深圳)、US 美國。
+// 美國分不出 NYSE / NASDAQ,一律先記 NASDAQ(抓價只看代碼、不看交易所),使用者可在編輯列改。
+function tickerFromCode(code) {
+  const m = String(code || '').trim().toUpperCase().match(/^(\S+)\s+([A-Z]{2})$/);
+  if (!m) return null;
+  const [, c, mk] = m;
+  const ex = {TT: 'TPE', JP: 'TYO', KS: 'KRX', HK: 'HKG', LN: 'LON', US: 'NASDAQ',
+              CH: /^6/.test(c) ? 'SHA' : 'SHE'}[mk];
+  return ex ? `${c}:${ex}` : null;
+}
+// 對帳單上有、看板沒有的一筆 → 直接新增成部位(v156;純函式,測試直接呼叫)。
+// 名稱用對帳單的、代號由 tickerFromCode 推、幣別用該列的;股數與成本不在這裡填,
+// 讓重算後的預覽把它當成一般的「對帳單股數 vs 目前股數(0)」變更,套用時連同年度基準(v153)一起寫。
+function stmtNewPos(regionKey, groupName, rec) {
+  const r = P.regions.find(x => x.key === regionKey);
+  const g = r && r.groups.find(x => x.name === groupName);
+  if (!g || !rec || !rec.code) return null;
+  const tk = tickerFromCode(rec.code);
+  const cur = String(rec.cur || 'USD').toUpperCase();
+  const p = {name: String(rec.name || rec.code).trim().slice(0, 60) || String(rec.code), kind: 'live', cur,
+             stmt_code: [String(rec.code)], stmt_cur: cur};
+  if (tk) p.ticker = tk;
+  g.positions.push(p);
+  return p;
 }
 // 把對帳單的一筆記到某個部位上(純函式,測試直接呼叫):回傳有沒有改到
 function stmtMapTo(key, code, cur) {
@@ -2735,8 +2765,8 @@ function stmtDiffHtml(d) {
       <tbody>${rows}</tbody></table></div>`
       : '<div class="note">沒有任何差異 —— 目前持倉與這份對帳單一致。</div>'}
     ${d.unmatched.length ? `<div class="note" style="margin-top:10px">
-      <b>對帳單有、看板沒對應的 ${d.unmatched.length} 筆</b>(不會被匯入)。在右邊選一個部位就會把這個代號記到那個部位上,預覽立刻重算;
-      看板上沒有的,先取消、到編輯模式新增部位再匯入一次:<br>
+      <b>對帳單有、看板沒對應的 ${d.unmatched.length} 筆</b>(不會被匯入)。右邊選「對應到現有部位」會把代號記到那個部位;
+      選「＋ 新增到 …」會直接在那個 basket 建立新部位(名稱、代號、幣別自動帶入,可在編輯模式改)。預覽都會立刻重算;按取消全部還原:<br>
       <table style="margin-top:4px">${d.unmatched.map(r => `<tr><td>${esc(r.code)} ${esc(r.name)}<span class="tk">${esc(r.cur)} · 市值 ${(+r.mv_k || 0).toLocaleString('en-US', {maximumFractionDigits: 0})} K</span></td>
         <td><select class="stmtMap" data-code="${esc(r.code)}" data-cur="${esc(r.cur)}"><option value="">(不對應)</option>${stmtMapOpts()}</select></td></tr>`).join('')}</table></div>` : ''}
     ${(() => { const g = d.changes.filter(c => c.gone).length, t = d.changes.length;
@@ -2769,8 +2799,14 @@ async function importStmt(file) {
     // 預覽裡做的對應先記著:按「套用」才算數,取消就原樣還原(不留在記憶體裡等下次 commit 偷偷存掉)
     const undo = [];
     const cancel = () => {
-      undo.reverse().forEach(u => { if (u.code == null) delete u.p.stmt_code; else u.p.stmt_code = u.code;
-                                    if (u.cur == null) delete u.p.stmt_cur; else u.p.stmt_cur = u.cur; });
+      undo.reverse().forEach(u => {
+        if (u.created) {                                           // 新增的部位整個拿掉
+          const r = P.regions.find(x => x.key === u.rk), g = r && r.groups.find(x => x.name === u.gn);
+          if (g) g.positions = g.positions.filter(x => x !== u.created);
+          return;
+        }
+        if (u.code == null) delete u.p.stmt_code; else u.p.stmt_code = u.code;
+        if (u.cur == null) delete u.p.stmt_cur; else u.p.stmt_cur = u.cur; });
       undo.length = 0; close();
     };
     const show = () => {
@@ -2781,6 +2817,13 @@ async function importStmt(file) {
       // 未對應的列:選了部位就把代號記到那個部位、重算預覽
       document.querySelectorAll('.stmtMap').forEach(sel => sel.addEventListener('change', () => {
         if (!sel.value) return;
+        if (sel.value.startsWith('new||')) {                      // v156:新增部位
+          const [, rk, gn] = sel.value.split('||');
+          const rec = recs.find(x => x.code === sel.dataset.code);
+          const np = stmtNewPos(rk, gn, rec);
+          if (np) { undo.push({created: np, rk, gn}); d = stmtDiff(recs); show(); }
+          return;
+        }
         const {p} = findPos(sel.value);
         if (p) undo.push({p, code: p.stmt_code ?? null, cur: p.stmt_cur ?? null});
         if (stmtMapTo(sel.value, sel.dataset.code, sel.dataset.cur)) { d = stmtDiff(recs); show(); }
@@ -2854,6 +2897,9 @@ async function importStmt(file) {
           c.p.ytd_base_mv = +(c.mvK || 0).toFixed(3);
           c.p.ytd_base_cost = +(c.costS || 0).toFixed(3);
         }
+        // 新部位要到下一輪建置才有報價;先把對帳單市值當快照,畫面上才不會是 0(有報價後就不用它)
+        if (c.firstImport && c.mvK && FX[c.stmtCur] && !(c.p.q && c.p.q.price))
+          c.p.mv = +(c.mvK / FX[c.stmtCur]).toFixed(1);
         c.p.units_manual = c.newU;
         c.p.cost = c.newC;
         c.p.cost_src = 'stmt';
