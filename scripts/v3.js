@@ -2675,6 +2675,11 @@ function stmtDiff(recs) {
     // 不算「變更」、也不列在預覽 —— 否則每份對帳單都會因為價格不同列出一整排 Breakeven 變動
     // (2026-09-08 曾把一整份預覽的大半算成這種假差異)。套用時仍悄悄更新快照當備援。
     if (near(oldU, newU) && near(oldC, perShare) && !realChanged) return;
+    // v158:對帳單幣別 ≠ 報價幣別(對帳單記歐元、報價是美國 ADR)時,每股成本要用「今天的匯率」換過去,
+    // 匯率一動,換出來的成本就跟著動 —— 股數沒變、已實現沒變,每份對帳單卻都列一筆「成本 239.96 → 239.83」。
+    // 這種只是匯率漂移,不是成本變了:股數相同、已實現相同、差距在 2% 內 → 不算變更,成本維持原值。
+    if (stmtCur !== qCur && near(oldU, newU) && !realChanged && oldC > 0
+        && Math.abs(perShare / oldC - 1) < 0.02) return;
     // 累積已實現只增不減;明顯倒退代表帳戶計數器被重置或匯錯檔,要在預覽裡大聲說
     const realBack = realK != null && p.stmt_real_k != null &&
                      realK < p.stmt_real_k - Math.max(1, Math.abs(p.stmt_real_k) * 0.01);
