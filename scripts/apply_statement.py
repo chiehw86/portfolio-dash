@@ -224,6 +224,12 @@ def main():
                     p["ytd_base"] = real
                     p["ytd_base_mv"] = round(sum(h["mv"] for h in hits), 3)
                     p["ytd_base_cost"] = round(sum(h["cost"] for h in hits), 3)
+                # v158:對帳單幣別 ≠ 報價幣別時,股數與已實現都沒變、換算後的成本只差 2% 以內 → 是匯率漂移,
+                # 不是成本變了;成本維持原值(與前端 stmtDiff 同一條)。
+                if (stmt_cur != q_cur and near(p.get("units_manual"), u) and near(p.get("stmt_real_k"), real)
+                        and p.get("cost") and abs(per / float(p["cost"]) - 1) < 0.02):
+                    per = float(p["cost"])
+                    same = True
                 p["units_manual"], p["cost"], p["cost_src"] = u, per, "stmt"
                 p["stmt_real_k"] = real
                 _bv = [h for h in hits if h.get("be") is not None and h["cost"]]
