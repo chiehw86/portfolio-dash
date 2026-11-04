@@ -764,7 +764,11 @@ def _fetch_one(t):
             # 昨天的收盤。所以「還沒發生」要用時鐘判:日期在今天之後,或今天這一場還沒開盤。
             # 開盤後拿到標成「前一天(週末)」的日線 = 時區標錯的今天這一場,場次改成今天即可。
             _exp_s = expected_session(t)
-            _ex_k = t.partition(":")[2]
+            # v159:美股的掛牌代號(NYSE / NASDAQ / NYSEARCA / OTCMKTS)不在 WINDOWS 裡,以前直接跳過這道守門。
+            # 2026-11-04 美東 09:08(開盤前)一檔 OTC 標的拿到一根標成今天的盤前日線,場次 = 11/04;
+            # 同市場共識因此被拉到 11/04,其餘十幾檔美股全部變成「⚠ 報價停在 11/03」、今日漲跌被拿掉。
+            # 用 _ex_of 把它們歸到「US」這個市場(與共識比對同一套分組)。
+            _ex_k = _ex_of(t)
             if sess and not live and _exp_s and sess > _exp_s and _ex_k in WINDOWS:
                 _d0, _h0 = _local(_ex_k)
                 _opened_today = _d0.weekday() < 5 and _h0 >= WINDOWS[_ex_k][0]
