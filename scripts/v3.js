@@ -136,6 +136,24 @@ const _posKey = p => p.ticker || p.name;
 // 國家視角的跨區分頁(v160:韓國)只是「換個角度看同一批部位」,不是主題 —— 那裡的鏡像列
 // 不能拿來改主題歸屬,否則同時掛在半導體或國防 basket 的韓股,主題會被改成「韓國」。
 const GEO_VIEWS = new Set(['korea']);
+// v161:國家視角只看「目前持有的部位」—— 損益欄改成持有損益(市值 − 成本),不計入已實現(使用者 2026-11-10)。
+// v162:所有分頁都改成持有損益(使用者:「其他分區也用相同方式,盡可能呈現現況」)。頂端 KPI、走勢圖、
+// 已出清追蹤、匯總報表仍是年度損益(含已實現),年度績效照樣看得到。
+// 成本來源:有每股成本 / 總成本的用它;報表 NAV 的靜態部位(基金 / PE)沒有成本,用報表的 Breakeven
+// 反推(成本 ≈ 市值 ÷ (1 + Breakeven)),顯示時標「≈」—— PE 的那一格是 TVPI,有過配息的話這個反推會偏。
+// 連動合計列(derived)= 成分加總。
+const heldCostK = p => {
+  if (p.derived) return p._heldC ?? null;
+  const c = costK(p); if (c != null) return c;
+  if (p.kind !== 'live' && p.be != null && p.be !== '' && +p.be > -99.9) {
+    const mv = effMv(p); return mv ? mv / (1 + (+p.be) / 100) : null;
+  }
+  return null;
+};
+const heldIsEst = p => p.derived ? !!p._heldEst : (costK(p) == null && heldCostK(p) != null);
+const heldPl = p => { if (p.derived) return p._held ?? null; const c = heldCostK(p); return c == null ? null : effMv(p) - c; };
+const heldRet = p => { const c = heldCostK(p), u = heldPl(p); return (c && u != null) ? u / c * 100 : null; };
+const HELD_ALL = true;                            // 所有分頁都用持有損益(v162)
 function mirrorTags() {
   const m = {};
   P.regions.forEach(r => r.groups.forEach(g => g.positions.forEach(p => {
@@ -401,6 +419,9 @@ function resolveDerived() {
     // 鏡像列曾顯示損益為負、旁邊卻掛著正的報酬率。
     const sr = sumRet(src);
     p._den = sr ? sr.d : null;
+    p._held = src.reduce((s, x) => s + (heldPl(x) || 0), 0);
+    p._heldC = src.reduce((s, x) => s + (heldCostK(x) || 0), 0) || null;
+    p._heldEst = src.some(x => heldIsEst(x));
     if (sr) p.ret = sr.ret;
     // Breakeven 也照成分即時算(Σ市值 ÷ Σ成本 − 1);鏡像列曾停在減碼前的舊值,
     // 與成分合計差了十個百分點。
@@ -900,11 +921,12 @@ function render() {
     const rpos = rall.filter(p => !isDup(p));
     const rmv = rall.reduce((s,p) => s + effMv(p), 0);
     const rnet = rpos.reduce((s,p) => s + effMv(p), 0);
-    const rpl = rall.reduce((s,p) => s + (ytdOf(p)||0), 0);
+    const rgeo = HELD_ALL || GEO_VIEWS.has(reg.key);
+    const rpl = rall.reduce((s,p) => s + ((rgeo ? heldPl(p) : ytdOf(p))||0), 0);
     const rday = rall.filter(p => p.q).reduce((s,p) => s + dayOf(p), 0);
     const rdayTxt = rall.some(p => p.q) ? `· 今日 <span class="${cls(rday)}">${sign0(rday)}</span>` : '';
     const rnetTxt = (rmv - rnet > 0.5) ? ` <span class="sub" title="其餘為重複列示(鏡像列),已在原區域計入">計入總資產 ${fmt0(rnet)}(${(rnet/tot*100).toFixed(1)}%)</span>` : '';
-    out += `<div class="card" id="sec-${esc(reg.key)}"><h2>${esc(reg.name)} <span class="mut" style="font-weight:400">· ${fmt0(rmv)} USD K(${(rmv/tot*100).toFixed(1)}%)· YTD <span class="${cls(rpl)}">${sign0(rpl)}</span> ${rdayTxt}${rnetTxt}</span></h2>`;
+    out += `<div class="card" id="sec-${esc(reg.key)}"><h2>${esc(reg.name)} <span class="mut" style="font-weight:400">· ${fmt0(rmv)} USD K(${(rmv/tot*100).toFixed(1)}%)· ${rgeo ? '持有損益' : 'YTD'} <span class="${cls(rpl)}">${sign0(rpl)}</span> ${rdayTxt}${rnetTxt}</span></h2>`;
     reg.groups.forEach(g => {
       // basket 小計採「含 dup」口徑,與報表一致(鏡像列屬該 basket 的一員);
       // dup 的部分不計入總資產,故另外標示 gnet。
@@ -917,7 +939,7 @@ function render() {
       // 與區域標題(v148)、匯總報表(v149)一致;計入總資產的部分在左下角另外標。
       // (以前市值含 dup、成本 / 損益 / 今日不含,跨區視角那一組的小計市值五萬多配損益個位數,使用者看不懂。)
       const gall = g.positions;
-      const gpl = gall.reduce((s,p) => s + (ytdOf(p)||0), 0);
+      const gpl = gall.reduce((s,p) => s + ((rgeo ? heldPl(p) : ytdOf(p))||0), 0);
       const gkey = `${reg.key}||${g.name}`;
       const collapsed = !EDIT && COLLAPSED.has(fnv(gkey));
       out += `<div class="grp${collapsed ? ' collapsed' : ''}" data-gkey="${esc(gkey)}"><h3>${EDIT
@@ -927,7 +949,7 @@ function render() {
           : `<span class="gtoggle">${collapsed ? '▸' : '▾'}</span> ` + esc(g.name)}</h3><div class="tblwrap"><table>
         <thead><tr><th>部位</th><th class="num">市值 USD K</th><th class="num xs-hide">佔本組</th>
         <th class="num xs-hide">成本 USD K</th><th class="num xs-hide">未實現損益</th>
-        <th class="num xs-hide" title="市值 ÷ 累積成本 − 1(券商對帳單 Breakeven Return 的定義);有成本的部位以即時價計算,報表部位為匯入時的快照">Breakeven</th><th class="num">YTD P&L</th><th class="num">YTD Ret</th><th class="num">今日</th><th>狀態</th>${EDIT?'<th></th>':''}</tr></thead><tbody>`;
+        <th class="num xs-hide" title="市值 ÷ 累積成本 − 1(券商對帳單 Breakeven Return 的定義);有成本的部位以即時價計算,報表部位為匯入時的快照">Breakeven</th>${rgeo ? '<th class="num" title="目前持有部位的損益(市值 − 成本),不含已實現">持有損益</th><th class="num" title="持有損益 ÷ 成本">持有報酬</th>' : '<th class="num">YTD P&L</th><th class="num">YTD Ret</th>'}<th class="num">今日</th><th>狀態</th>${EDIT?'<th></th>':''}</tr></thead><tbody>`;
       const rowHtml = (p, pi, extraCls) => {
         const mv = effMv(p);
         // v155:有市場報價的部位在市值底下多一行現價(原幣),使用者 2026-10-30 要求。
@@ -956,8 +978,8 @@ function render() {
           `<td class="num xs-hide ${uk != null ? cls(uk) : 'mut'}">${uk != null
               ? sign0(uk) + `<span class="sub ${cls(uk)}">${ck ? spct(uk/ck*100) : ''}</span>` : '—'}</td>` +
           `<td class="num xs-hide">${beLive(p) != null ? beLive(p).toFixed(1) + '%' : '—'}</td>` +
-          `<td class="num ${cls(ytdOf(p)||0)}">${ytdOf(p) != null ? sign0(ytdOf(p)) : '—'}</td>` +
-          `<td class="num ${cls(ytdRetOf(p)||0)}">${ytdRetOf(p) != null ? spct(ytdRetOf(p)) : '—'}</td>` +
+          ((pl, rt, est) => `<td class="num ${cls(pl||0)}"${est ? ' title="這一檔沒有成本資料,成本由報表 Breakeven 反推"' : ''}>${pl != null ? (est ? '≈' : '') + sign0(pl) : '—'}</td>` +
+            `<td class="num ${cls(rt||0)}">${rt != null ? (est ? '≈' : '') + spct(rt) : '—'}</td>`)(rgeo ? heldPl(p) : ytdOf(p), rgeo ? heldRet(p) : ytdRetOf(p), rgeo && heldIsEst(p)) +
           `<td class="num">${today}</td><td>${badge(p)}</td>` +
           (EDIT ? `<td><button class="del editBtn" data-key="${esc(key)}" title="編輯">✎</button></td>` : '') +
           `</tr>`;
@@ -986,8 +1008,8 @@ function render() {
         const amv = ps2.reduce((s2, q2) => s2 + effMv(q2), 0);
         const ack = ps2.map(costK).filter(v => v != null).reduce((s2, v) => s2 + v, 0);
         const auk = amv - ack;
-        const ay = ps2.reduce((s2, q2) => s2 + (ytdOf(q2) || 0), 0);
-        const ab = ps2.reduce((s2, q2) => s2 + (ytdBaseUsd(q2) || 0), 0);
+        const ay = rgeo ? auk : ps2.reduce((s2, q2) => s2 + (ytdOf(q2) || 0), 0);
+        const ab = rgeo ? ack : ps2.reduce((s2, q2) => s2 + (ytdBaseUsd(q2) || 0), 0);
         const aday = ps2.reduce((s2, q2) => s2 + dayOf(q2), 0);
         const q0 = ps2[0], open = SPLITOPEN.has(fnv(it.ticker));
         const today = (q0.q && q0.q.chg != null)
@@ -1016,9 +1038,12 @@ function render() {
       // 小計報酬率 = Σ損益 ÷ Σ分母(不含 dup,與左欄 P&L 同口徑)。
       // 原本優先用報表的 report_total.ret —— 那是報表日的舊值,左欄損益卻是即時的,
       // 曾有 basket 損益為負卻掛著正報酬率、也有小計高估八個百分點的案例。
-      const gsr = sumRet(gall);
+      const gsr = rgeo ? (() => { const c = gall.map(heldCostK).filter(v => v != null).reduce((a, v) => a + v, 0);
+                                    const covMv = gall.filter(x => heldCostK(x) != null).reduce((a, x) => a + effMv(x), 0);
+                                    return c ? {n: gpl, d: c, ret: gpl / c * 100, cov: gmvAll ? covMv / gmvAll * 100 : 100} : null; })()
+                       : sumRet(gall);
       const gret = gsr
-        ? `<span title="Σ損益 ÷ Σ(年初市值 + 年內買進成本)${gsr.cov < 99.5
+        ? `<span title="${rgeo ? 'Σ持有損益 ÷ Σ成本(沒有成本的報表部位用 Breakeven 反推)' : 'Σ損益 ÷ Σ(年初市值 + 年內買進成本)'}${gsr.cov < 99.5
             ? `;涵蓋本組 ${gsr.cov.toFixed(0)}% 市值` : ''}${g.report_total && g.report_total.ret != null
             ? `;報表小計 ${spct(g.report_total.ret)}(報表日口徑)` : ''}">${retCell(gsr)}</span>`
         : '—';
