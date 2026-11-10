@@ -112,7 +112,7 @@ function geoOf(p, regKey) {
 }
 
 // 區域|群組 → 主題:用群組名裡的關鍵字推,不在程式碼裡列 basket 名單(程式碼是公開的)。
-const REGCN = {taiwan:'台股', japan:'日本', china:'中國'};
+const REGCN = {taiwan:'台股', japan:'日本', china:'中國', korea:'韓國'};
 function grpTheme(regKey, gname) {
   const g = String(gname || ''), rc = REGCN[regKey] || '';
   if (/defen|國防/i.test(g)) return '國防';
@@ -133,10 +133,13 @@ function grpTheme(regKey, gname) {
 // (台股五檔主動基金經「TW Active Funds」連動列歸半導體;日本國防那籃經「Japan Defense」連動列歸國防)。
 // 以前只看半導體區、只看有代號的鏡像列,主題圖的半導體因此比區域標題少一成。
 const _posKey = p => p.ticker || p.name;
+// 國家視角的跨區分頁(v160:韓國)只是「換個角度看同一批部位」,不是主題 —— 那裡的鏡像列
+// 不能拿來改主題歸屬,否則同時掛在半導體或國防 basket 的韓股,主題會被改成「韓國」。
+const GEO_VIEWS = new Set(['korea']);
 function mirrorTags() {
   const m = {};
   P.regions.forEach(r => r.groups.forEach(g => g.positions.forEach(p => {
-    if (!isDup(p)) return;
+    if (!isDup(p) || GEO_VIEWS.has(r.key)) return;
     const theme = grpTheme(r.key, g.name);
     if (p.derived) {
       const src = P.regions.find(x => x.key === p.derived.region);
@@ -1073,6 +1076,7 @@ function render() {
     if (EDIT) out += `<div class="btnrow"><button class="addGrp" data-reg="${esc(reg.key)}">＋ 新增 basket</button></div>`;
     if (reg.key === 'japan') out += `<div class="note">報表口徑:日本合計不含 PE;此處小計含 PE 一併列示。</div>`;
     if (reg.key === 'semi') out += `<div class="note">此視角與台股部位重疊(dup 列),總計僅計入海外部分。</div>`;
+    if (GEO_VIEWS.has(reg.key)) out += `<div class="note">此視角的列都是其他區域部位的重複列示(dup),總資產不重複計入;股數與成本隨對帳單一起更新。</div>`;
     out += `</div>`;
   });
   $('regions').innerHTML = out;
